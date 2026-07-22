@@ -1,0 +1,77 @@
+random_state: 42
+
+data:
+  raw_path: "data/raw/paysim_transactions.csv"
+  processed_dir: "data/processed"
+
+model_output:
+  dir: "models"
+
+split:
+  # Time-based (not random shuffle) split: train on step <= this quantile,
+  # test on later steps. See features.py / train_pipeline.py for why.
+  time_cutoff_quantile: 0.8
+
+sampling:
+  # Train-side only -- the test set is left at the real ~0.34% fraud rate
+  # so evaluation reflects deployment conditions. With only ~3,963 fraud
+  # rows in train, the ~5.1M non-fraud rows cost real compute (across
+  # every model, and every future CV fold / tuning trial) for rapidly
+  # diminishing information. Keep all fraud + a random sample of non-fraud
+  # at this ratio instead of training on the full 5.1M rows.
+  undersample_train: true
+  negative_to_positive_ratio: 50
+
+# Explicit dtypes at CSV load time. Left as config (not hardcoded) since a
+# schema change in a future dataset swap should mean one edit here, not a
+# code change. See train_pipeline.py comments for the memory rationale.
+read_dtypes:
+  step: int32
+  type: category
+  amount: float32
+  oldbalanceOrg: float32
+  newbalanceOrig: float32
+  nameDest: category
+  oldbalanceDest: float32
+  newbalanceDest: float32
+  isFraud: int8
+  isFlaggedFraud: int8
+
+# Each block's keys are passed straight through as sklearn constructor
+# kwargs (see train_pipeline.py) -- random_state is injected separately
+# from the top-level key above so it stays consistent across all models.
+models:
+  logistic_regression:
+    class_weight: balanced
+    max_iter: 1000
+
+  ridge:
+    l1_ratio: 0
+    C: 0.1
+    class_weight: balanced
+    max_iter: 1000
+
+  lasso:
+    # penalty was previously left unset (defaulting to l2, silently
+    # ignoring l1_ratio) and solver was liblinear, which took ~18 minutes
+    # to converge on 5.1M rows with an extreme class_weight ratio.
+    # l1_ratio=1 + solver=saga actually applies L1 and is built for
+    # datasets at this scale. (penalty=l1 works identically as of this
+    # sklearn version but is deprecated, removed in 1.10 -- l1_ratio is
+    # the forward-compatible way to say the same thing.)
+    l1_ratio: 1
+    solver: saga
+    C: 0.1
+    class_weight: balanced
+    max_iter: 1000
+
+  hist_gradient_boosting:
+    # Replaces RandomForestClassifier: RF's exhaustive per-node split search
+    # scales with row count, which is slow even after undersampling scales
+    # it down. HistGradientBoostingClassifier bins each feature into ~255
+    # buckets once up front, so split search cost is ~constant in row count
+    # -- same algorithmic family as XGBoost/LightGBM (Sprint 1), and ships
+    # with scikit-learn already.
+    max_iter: 200
+    max_depth: 8
+    class_weight: balanced

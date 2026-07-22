@@ -1,0 +1,24 @@
+# Data (large / re-downloadable from Kaggle, not meant to be committed)
+data/raw/*.csv
+data/raw/*.zip
+
+# Model artifacts and run metadata (regenerate via training; run-specific)
+models/**
+
+# Logs
+reports/*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local state
+.claude/
