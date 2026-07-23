@@ -30,6 +30,7 @@ import logging
 import subprocess
 from datetime import datetime, timezone
 
+import duckdb
 import joblib
 import numpy as np
 import pandas as pd
@@ -39,7 +40,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from config import load_config, PROJECT_ROOT
-from features import build_feature_table, FEATURE_COLUMNS
+from features import feature_query, FEATURE_COLUMNS, FEATURE_VERSION
 from custom_metrics import weighted_bce_loss, suggest_pos_weight, precision_at_k
 
 CONFIG = load_config()
@@ -51,7 +52,14 @@ REPORTS_DIR = PROJECT_ROOT / "reports"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-READ_DTYPES = CONFIG["read_dtypes"]
+# Persistent DuckDB store for the raw transactions table. DuckDB executes
+# out-of-core (spills to disk instead of materializing the full 6.36M-row
+# table in Python memory), and re-parsing the 493MB CSV every run is the
+# other expensive step worth avoiding -- so the `transactions` table is
+# loaded once and reused across runs unless the raw CSV changes underneath
+# it (checked via mtime/size in `_load_meta`).
+DB_PATH = PROCESSED_DIR / "paysim.duckdb"
+
 RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 logging.basicConfig(
@@ -75,6 +83,86 @@ def git_commit_hash() -> str:
         return "nogit"
 
 
+def log_memory(stage: str) -> None:
+    """Log current process RSS. Lets us see where a run's peak memory
+    actually comes from instead of guessing -- this machine has 8GB total,
+    so peak footprint is the difference between a run finishing and the
+    system hanging."""
+    try:
+        import psutil
+    except ImportError:
+        return
+    rss_mb = psutil.Process().memory_info().rss / (1024 ** 2)
+    logger.info("  [memory] %-24s %7.0f MB RSS", stage, rss_mb)
+
+
+def _table_exists(con: duckdb.DuckDBPyConnection, name: str) -> bool:
+    return con.execute(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = ?", [name]
+    ).fetchone() is not None
+
+
+def _cache_meta(con: duckdb.DuckDBPyConnection):
+    if not _table_exists(con, "_cache_meta"):
+        return None
+    return con.execute(
+        "SELECT raw_mtime, raw_size, feature_version FROM _cache_meta"
+    ).fetchone()
+
+
+def _ensure_transactions_table(con: duckdb.DuckDBPyConnection, raw_path) -> bool:
+    """Loads the raw CSV into a `transactions` table on first run (or
+    whenever the CSV changes), and reuses the persisted table otherwise --
+    the one-time cost of a 6.36M-row CSV parse doesn't need to be paid on
+    every rerun during normal iteration. Returns True if the table was
+    (re)loaded -- meaning any materialized `features` table is now stale
+    too, regardless of FEATURE_VERSION."""
+    raw_stat = raw_path.stat()
+    meta = _cache_meta(con)
+
+    if _table_exists(con, "transactions") and meta \
+            and meta[0] == raw_stat.st_mtime and meta[1] == raw_stat.st_size:
+        logger.info("Using cached transactions table in %s (raw CSV unchanged)", DB_PATH)
+        return False
+
+    logger.info("Loading raw data from %s into DuckDB (one-time cost, cached after)", raw_path)
+    con.execute(f"""
+        CREATE OR REPLACE TABLE transactions AS
+        SELECT *, row_number() OVER () AS row_id
+        FROM read_csv_auto('{raw_path.as_posix()}')
+    """)
+    return True
+
+
+def _ensure_features_table(con: duckdb.DuckDBPyConnection, raw_path, transactions_reloaded: bool) -> None:
+    """Materializes feature_query()'s result into a `features` table instead
+    of re-running the window-function query (a full sort over 6.36M rows,
+    ~60s) on every run. Recomputed when the raw CSV changed (transactions
+    table was just reloaded) or when FEATURE_VERSION was bumped -- otherwise
+    the materialized table from the last run is reused as-is."""
+    raw_stat = raw_path.stat()
+    meta = _cache_meta(con)
+    cache_valid = (
+        not transactions_reloaded
+        and _table_exists(con, "features")
+        and meta is not None
+        and meta[2] == FEATURE_VERSION
+    )
+
+    if cache_valid:
+        logger.info("Using cached features table (raw CSV + feature logic unchanged)")
+        return
+
+    logger.info("Computing engineered features (window-function query over transactions)...")
+    con.execute(f"CREATE OR REPLACE TABLE features AS {feature_query()}")
+    con.execute(
+        "CREATE OR REPLACE TABLE _cache_meta AS "
+        "SELECT ? AS raw_mtime, ? AS raw_size, ? AS feature_version",
+        [raw_stat.st_mtime, raw_stat.st_size, FEATURE_VERSION],
+    )
+    logger.info("Cached features table to %s (future runs skip recomputing it)", DB_PATH)
+
+
 def undersample_majority(X: pd.DataFrame, y: np.ndarray, ratio: float, random_state: int):
     """
     Keep every positive (fraud) row and a random sample of negative rows at
@@ -94,19 +182,35 @@ def undersample_majority(X: pd.DataFrame, y: np.ndarray, ratio: float, random_st
 
 
 def load_and_prepare():
-    logger.info("Loading raw data from %s", RAW_PATH)
-    df = pd.read_csv(RAW_PATH, dtype=READ_DTYPES)
-    df = build_feature_table(df)
+    log_memory("start")
 
-    X = df[FEATURE_COLUMNS].fillna(0).astype("float32")
-    y = df["isFraud"].values
+    con = duckdb.connect(str(DB_PATH))
+    try:
+        transactions_reloaded = _ensure_transactions_table(con, RAW_PATH)
+        log_memory("after ensure transactions table")
+
+        _ensure_features_table(con, RAW_PATH, transactions_reloaded)
+        log_memory("after ensure features table")
+
+        # Only the materialized ~11-column features table (not the raw
+        # string columns) ever crosses into pandas/Python memory.
+        feat_df = con.sql("SELECT * FROM features").df().fillna(0)
+        log_memory("after feature fetch")
+    finally:
+        con.close()
+
+    X_all = feat_df[FEATURE_COLUMNS].to_numpy(dtype="float32")
+    y = feat_df["isFraud"].to_numpy()
+    step = feat_df["step"].to_numpy()
+    del feat_df
+
+    X = pd.DataFrame(X_all, columns=FEATURE_COLUMNS)
 
     # Time-based split (not random shuffle) -- same leakage-safety pattern
     # as the chronological splits used in the Deep Learning Call Center
     # and Clinical EMR projects. Train on earlier steps, test on later ones.
-    df = df.reset_index(drop=True)
-    cutoff = df["step"].quantile(CONFIG["split"]["time_cutoff_quantile"])
-    train_mask = df["step"] <= cutoff
+    cutoff = np.quantile(step, CONFIG["split"]["time_cutoff_quantile"])
+    train_mask = step <= cutoff
     X_train, X_test = X[train_mask], X[~train_mask]
     y_train, y_test = y[train_mask], y[~train_mask]
 
@@ -133,6 +237,7 @@ def load_and_prepare():
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
+    log_memory("after split + scale")
 
     return X_train_scaled, X_test_scaled, y_train, y_test, list(X.columns), scaler, true_pos_weight
 

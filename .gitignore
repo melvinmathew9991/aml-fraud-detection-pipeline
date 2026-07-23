@@ -2,6 +2,9 @@
 data/raw/*.csv
 data/raw/*.zip
 
+# DuckDB store (regenerable from data/raw via train_pipeline.py)
+data/processed/*.duckdb
+
 # Model artifacts and run metadata (regenerate via training; run-specific)
 models/**
 

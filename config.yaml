@@ -22,21 +22,6 @@ sampling:
   undersample_train: true
   negative_to_positive_ratio: 50
 
-# Explicit dtypes at CSV load time. Left as config (not hardcoded) since a
-# schema change in a future dataset swap should mean one edit here, not a
-# code change. See train_pipeline.py comments for the memory rationale.
-read_dtypes:
-  step: int32
-  type: category
-  amount: float32
-  oldbalanceOrg: float32
-  newbalanceOrig: float32
-  nameDest: category
-  oldbalanceDest: float32
-  newbalanceDest: float32
-  isFraud: int8
-  isFlaggedFraud: int8
-
 # Each block's keys are passed straight through as sklearn constructor
 # kwargs (see train_pipeline.py) -- random_state is injected separately
 # from the top-level key above so it stays consistent across all models.
