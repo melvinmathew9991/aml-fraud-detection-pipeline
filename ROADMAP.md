@@ -86,7 +86,20 @@ is only ~0.20 — 4 out of 5 flagged transactions are false alarms.
 ## Status
 
 - [x] Real dataset (PaySim, 6.36M rows) swapped in and pipeline verified end-to-end
-- [ ] Sprint 0
+- [x] Sprint 0 -- git init, requirements.txt, config.yaml, logging, model persistence
+      (also fixed liblinear/RandomForest performance bugs found along the way:
+      total run time 20+ min -> ~80s via saga solver + HistGradientBoosting +
+      train-side undersampling)
+- [x] Data-layer hardening (post-Sprint 0, pre-Sprint 1, not itself a sprint):
+      full runs were hanging/crashing the 8GB dev machine. Rewrote the
+      account-history aggregate in features.py as a DuckDB SQL window
+      function (was a full-frame pandas sort + groupby cumsum/cumcount that
+      transiently duplicated the whole wide dataframe), and moved
+      train_pipeline.py's data loading off pandas.read_csv onto a persistent
+      DuckDB store (data/processed/paysim.duckdb, gitignored, cached by raw
+      file mtime/size + FEATURE_VERSION). Peak RSS: unmeasured multi-GB spike
+      -> ~900MB-1GB. Cached reruns: ~33s. Results verified to match the old
+      pandas pipeline within noise.
 - [ ] Sprint 1
 - [ ] Sprint 2
 - [ ] Sprint 3
