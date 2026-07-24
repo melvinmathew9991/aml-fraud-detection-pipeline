@@ -11,6 +11,10 @@ models/**
 # Logs
 reports/*.log
 
+# MLflow local tracking store (regenerable via train_pipeline.py)
+mlruns/
+mlflow.db
+
 # Python
 __pycache__/
 *.pyc
