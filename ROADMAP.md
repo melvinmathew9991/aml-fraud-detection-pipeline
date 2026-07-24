@@ -116,7 +116,75 @@ an already-strong model and making the operating point realistic:
       the "Precision@21250 ~0.20" number was an artifact of K=5x fraud
       count at ~99.95% recall, not a model weakness — see corrected Sprint 2
       framing above.
-- [ ] Sprint 1
+- [x] Sprint 1 -- expanding-window 3-fold time-based CV (`src/cv.py`),
+      XGBoost/LightGBM wired up and evaluated across all folds, Optuna
+      tuning, MLflow local (sqlite) tracking of every (model, fold) result.
+      Tree models land at PR-AUC ~0.9965-0.9971 (mean across folds).
+- [x] Post-Sprint-1 quick fixes (not itself a sprint): (1) Optuna's
+      objective originally scored a single designated fold, which happened
+      to be near-perfectly separable (see below) and gave it no signal to
+      discriminate trials -- changed to mean PR-AUC across all 3 CV folds,
+      after which XGBoost (tuned) does land ahead on PR-AUC (0.9971 vs
+      0.9968 untuned). (2) `scale_pos_weight` for XGBoost/LightGBM was set
+      to the true deployment-time cost ratio (~300-1700:1) even though
+      training data was already undersampled to 50:1 -- double-correcting
+      on top of undersampling; fixed to use the post-undersampling ratio,
+      mirroring what `class_weight='balanced'` already used for the other
+      models. (3) Fixed a LightGBM `eval_set` deprecation warning
+      (`eval_X`/`eval_y` instead). (4) Each Optuna trial now costs 3
+      fold-fits instead of 1 (from fix (1)), pushing a full run to ~30min
+      -- cut `n_trials` from 25 to 10 per model to bring it back to
+      ~15min, verified to not change which model wins on either metric.
+      Fixing (1) surfaced a new, genuine finding: Optuna's PR-AUC-only
+      objective found XGBoost hyperparameters that rank fraud slightly
+      better but calibrate worse -- weighted-BCE loss (`custom_metrics.py`)
+      over 2.5x worse than the untuned default, and marginally behind on
+      the realistic Precision@K=1x operating
+      point. "Best mean PR-AUC" and "best model" are not the same model
+      here, so `best_model` selection was changed from mean PR-AUC to
+      mean Precision@K at K=1x fraud count (the operationally relevant
+      metric this project's thesis is built around) -- under that
+      criterion `best_model` is LightGBM (default params), not the
+      higher-PR-AUC XGBoost (tuned). Optuna's tuning result is still
+      reported (`xgboost_best_params`/`top_pr_auc_model` in
+      `metadata.json`) for comparison, just no longer auto-selected as
+      the winner. Full writeup in `README.md` Results.
+      **CV surfaced something a single split couldn't**: fold 2's test
+      window is PR-AUC=1.0000 for every tree model but PR-AUC=0.06-0.08 for
+      every linear model. Checked directly against the raw transaction
+      table (not our engineered features, so not a leak): in that window
+      98.8% of fraud has `amount_to_balance_ratio` exactly 1.00 (account
+      drained to the cent) and 100% has `dest_is_merchant=0` -- a known
+      PaySim construction characteristic. That's a narrow, nonlinear
+      value-band rule trees split out trivially and a single linear
+      hyperplane structurally cannot express regardless of class
+      weighting. See `README.md` Results for the full writeup and
+      `data/processed/model_comparison_by_fold.csv` for the numbers.
+- [x] End-to-end audit of all Sprint 1 + post-Sprint-1 changes (not itself
+      a sprint), performed before anything was staged to git. Verified
+      clean: early-stopping/`predict_proba` correctness for both XGBoost
+      and LightGBM (confirmed empirically that early stopping actually
+      truncates predictions, not just training), `train_pos_weight` vs
+      `true_pos_weight` wiring (grepped every call site), `cv.py` fold
+      boundary/leakage correctness, `config.yaml`/`requirements.txt`
+      consistency, MLflow artifact persistence, and every numeric claim
+      in this file/README cross-checked against the actual output CSVs.
+      One real finding: `model_comparison_by_fold.csv` and
+      `precision_recall_at_k_by_fold.csv` were untracked in git despite
+      being cited by name in README/ROADMAP as evidence -- **still needs
+      `git add`ing at staging time**, since these files get regenerated
+      (and re-untracked relative to the index) by every verification
+      rerun done since the audit.
+- [ ] **Nothing from Sprint 1 onward is staged/committed yet.** Working
+      tree has: `.gitignore`, `README.md`, `ROADMAP.md`, `config.yaml`,
+      `data/processed/model_comparison.csv`, `data/processed/
+      precision_recall_at_k.csv`, `requirements.txt`, `src/
+      train_pipeline.py` modified; `src/cv.py` and the two `_by_fold.csv`
+      files untracked. Held back deliberately per the project's git
+      workflow (see below) -- only stage once iteration is genuinely
+      done, not mid-cycle. If a future session picks this back up,
+      `git status`/`git diff` are the source of truth for exactly what's
+      pending; this file documents the *why* behind each pending change.
 - [ ] Sprint 2
 - [ ] Sprint 3
 - [ ] Sprint 4
