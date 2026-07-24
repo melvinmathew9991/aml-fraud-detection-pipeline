@@ -47,12 +47,21 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 - Hyperparameter tuning (Optuna, optimizing PR-AUC)
 - Lightweight experiment tracking (MLflow local mode is enough — compare runs over time instead of overwriting `model_comparison.csv`)
 
-### Sprint 2 — Close the Precision@K gap
-The real weak point in current results: PR-AUC is ~0.9996 but Precision@21250
-is only ~0.20 — 4 out of 5 flagged transactions are false alarms.
+### Sprint 2 — Sharpen an already-strong ranker
+Originally framed as "close the Precision@K gap" (PR-AUC ~0.9996 but
+Precision@21250 only ~0.20). Re-examined 2026-07-24: K=21250 was hardcoded
+as 5x the test set's true fraud count (4,250), and Recall@21250 is ~99.95%
+— the model finds virtually every fraud in that window. Precision@K is
+mathematically capped at 1/5=0.20 whenever K=5x the fraud count and recall
+is ~100%, regardless of model quality. At K=1x fraud count (the realistic
+"K = actual daily fraud volume" operating point), HistGradientBoosting hits
+Precision@K=Recall@K=0.9988. See `data/processed/precision_recall_at_k.csv`
+for precision/recall at K in {1x, 2x, 5x, 10x} fraud count, per model.
+So the ranker itself is not the weak point; this sprint is about tightening
+an already-strong model and making the operating point realistic:
 - Velocity features (transactions/hour per account), graph features (fan-in/fan-out across `nameOrig`/`nameDest`)
 - SHAP explainability per prediction
-- Threshold tuning at the actual operating point instead of ranking by raw probability
+- Threshold tuning at a K set from actual review capacity, not a multiple of the (unknowable in production) true fraud count
 - Error analysis report (what the false positives in the top-K actually look like)
 
 ### Sprint 3 — Serving
@@ -100,6 +109,13 @@ is only ~0.20 — 4 out of 5 flagged transactions are false alarms.
       file mtime/size + FEATURE_VERSION). Peak RSS: unmeasured multi-GB spike
       -> ~900MB-1GB. Cached reruns: ~33s. Results verified to match the old
       pandas pipeline within noise.
+- [x] Metric-framing fix (post-data-layer-hardening, pre-Sprint 1, not itself
+      a sprint): added `recall_at_k` to `custom_metrics.py` and a
+      Precision/Recall@K curve (`data/processed/precision_recall_at_k.csv`)
+      across K in {1x, 2x, 5x, 10x} true fraud count, per model. Revealed
+      the "Precision@21250 ~0.20" number was an artifact of K=5x fraud
+      count at ~99.95% recall, not a model weakness — see corrected Sprint 2
+      framing above.
 - [ ] Sprint 1
 - [ ] Sprint 2
 - [ ] Sprint 3
