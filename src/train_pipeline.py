@@ -75,10 +75,15 @@ logger = logging.getLogger("train_pipeline")
 
 def git_commit_hash() -> str:
     try:
-        return subprocess.check_output(
+        commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=PROJECT_ROOT, stderr=subprocess.DEVNULL,
         ).decode().strip()
+        dirty = bool(subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=PROJECT_ROOT, stderr=subprocess.DEVNULL,
+        ).strip())
+        return f"{commit}-dirty" if dirty else commit
     except Exception:
         return "nogit"
 
