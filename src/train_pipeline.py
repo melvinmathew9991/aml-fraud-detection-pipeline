@@ -41,7 +41,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from config import load_config, PROJECT_ROOT
 from features import feature_query, FEATURE_COLUMNS, FEATURE_VERSION
-from custom_metrics import weighted_bce_loss, suggest_pos_weight, precision_at_k
+from custom_metrics import weighted_bce_loss, suggest_pos_weight, precision_at_k, recall_at_k
 
 CONFIG = load_config()
 
@@ -242,6 +242,15 @@ def load_and_prepare():
     return X_train_scaled, X_test_scaled, y_train, y_test, list(X.columns), scaler, true_pos_weight
 
 
+# Precision@K alone conflates two different things: how well the model
+# ranks fraud, and how K was chosen relative to the number of true frauds.
+# K = 5x the fraud count mathematically caps precision at 20% even for a
+# model with perfect recall at that K -- so every K we report is expressed
+# as a multiple of the test set's true fraud count, and always paired with
+# recall@K, which is the number that actually reflects ranking quality.
+K_FRAUD_MULTIPLIERS = [1, 2, 5, 10]
+
+
 def evaluate_model(name, y_test, y_proba, pos_weight):
     pr_auc = average_precision_score(y_test, y_proba)
     roc_auc = roc_auc_score(y_test, y_proba) if y_test.sum() > 0 else float("nan")
@@ -251,14 +260,31 @@ def evaluate_model(name, y_test, y_proba, pos_weight):
     k = max(n_test_fraud * 5, 10)  # e.g. "review top-K flagged cases per day"
     k = min(k, len(y_test))
     p_at_k = precision_at_k(y_test, y_proba, k=k)
+    r_at_k = recall_at_k(y_test, y_proba, k=k)
 
     logger.info("--- %s ---", name)
     logger.info("  PR-AUC:              %.4f  (primary metric under class imbalance)", pr_auc)
     logger.info("  ROC-AUC:             %.4f  (reported, but misleading alone at this imbalance)", roc_auc)
     logger.info("  Weighted BCE loss:   %.4f", w_bce)
     logger.info("  Precision@%d:          %.4f  (of top-%d flagged, fraction actually fraud)", k, p_at_k, k)
+    logger.info("  Recall@%d:             %.4f  (of all fraud, fraction caught in top-%d)", k, r_at_k, k)
+
+    curve_rows = []
+    for m in K_FRAUD_MULTIPLIERS:
+        k_m = min(max(n_test_fraud * m, 10), len(y_test))
+        curve_rows.append({
+            "model": name, "k_multiplier": m, "k": k_m,
+            "precision_at_k": precision_at_k(y_test, y_proba, k=k_m),
+            "recall_at_k": recall_at_k(y_test, y_proba, k=k_m),
+        })
+    logger.info("  Precision/Recall@K by review-capacity multiple of true fraud count:")
+    for row in curve_rows:
+        logger.info("    %2dx fraud count (K=%6d): precision=%.4f  recall=%.4f",
+                     row["k_multiplier"], row["k"], row["precision_at_k"], row["recall_at_k"])
+
     return {"model": name, "pr_auc": pr_auc, "roc_auc": roc_auc,
-            "weighted_bce": w_bce, "precision_at_k": p_at_k, "k": k}
+            "weighted_bce": w_bce, "precision_at_k": p_at_k, "recall_at_k": r_at_k,
+            "k": k, "n_test_fraud": n_test_fraud}, curve_rows
 
 
 def main():
@@ -271,23 +297,25 @@ def main():
     logger.info("Suggested cost-sensitive pos_weight: %.1f", pos_weight)
 
     results = []
+    curve_rows = []
     trained_models = {}
+
+    def record(name, y_proba):
+        result, rows = evaluate_model(name, y_test, y_proba, pos_weight)
+        results.append(result)
+        curve_rows.extend(rows)
 
     # --- Baseline 1: Logistic Regression (no regularization penalty tuning) ---
     logreg = LogisticRegression(**CONFIG["models"]["logistic_regression"])
     logreg.fit(X_train, y_train)
     trained_models["logistic_regression"] = logreg
-    results.append(evaluate_model(
-        "Logistic Regression (class_weight=balanced)",
-        y_test, logreg.predict_proba(X_test)[:, 1], pos_weight))
+    record("Logistic Regression (class_weight=balanced)", logreg.predict_proba(X_test)[:, 1])
 
     # --- Baseline 2: Ridge-penalized logistic regression (L2) ---
     ridge_lr = LogisticRegression(**CONFIG["models"]["ridge"])
     ridge_lr.fit(X_train, y_train)
     trained_models["ridge"] = ridge_lr
-    results.append(evaluate_model(
-        "Ridge-penalized Logistic Regression (L2, C=0.1)",
-        y_test, ridge_lr.predict_proba(X_test)[:, 1], pos_weight))
+    record("Ridge-penalized Logistic Regression (L2, C=0.1)", ridge_lr.predict_proba(X_test)[:, 1])
 
     # --- Baseline 3: Lasso-penalized logistic regression (L1) ---
     lasso_lr = LogisticRegression(**CONFIG["models"]["lasso"])
@@ -295,9 +323,7 @@ def main():
     trained_models["lasso"] = lasso_lr
     n_nonzero = np.sum(lasso_lr.coef_ != 0)
     logger.info("Lasso feature selection: %d/%d features kept nonzero", n_nonzero, len(feature_names))
-    results.append(evaluate_model(
-        "Lasso-penalized Logistic Regression (L1, C=0.1)",
-        y_test, lasso_lr.predict_proba(X_test)[:, 1], pos_weight))
+    record("Lasso-penalized Logistic Regression (L1, C=0.1)", lasso_lr.predict_proba(X_test)[:, 1])
 
     # --- Tree model: histogram-based gradient boosting with cost-sensitive
     # class weighting. Chosen over RandomForestClassifier because its split
@@ -309,9 +335,7 @@ def main():
                                           **CONFIG["models"]["hist_gradient_boosting"])
     hgb.fit(X_train, y_train)
     trained_models["hist_gradient_boosting"] = hgb
-    results.append(evaluate_model(
-        "HistGradientBoosting (class_weight=balanced)",
-        y_test, hgb.predict_proba(X_test)[:, 1], pos_weight))
+    record("HistGradientBoosting (class_weight=balanced)", hgb.predict_proba(X_test)[:, 1])
 
     # --- XGBoost / LightGBM: written correctly, requires local install ---
     # import xgboost as xgb
@@ -340,6 +364,10 @@ def main():
     results_df.to_csv(PROCESSED_DIR / "model_comparison.csv", index=False)
     best_model_name = results_df.iloc[0]["model"]
     logger.info("Best model by PR-AUC: %s", best_model_name)
+
+    curve_df = pd.DataFrame(curve_rows)
+    curve_df.to_csv(PROCESSED_DIR / "precision_recall_at_k.csv", index=False)
+    logger.info("Saved precision/recall-at-K curve to %s", PROCESSED_DIR / "precision_recall_at_k.csv")
 
     # Persist every trained model plus the shared scaler and run metadata, so
     # a later serving step can reproduce predictions without retraining.

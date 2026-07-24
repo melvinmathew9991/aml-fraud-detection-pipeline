@@ -1,0 +1,17 @@
+model,k_multiplier,k,precision_at_k,recall_at_k
+Logistic Regression (class_weight=balanced),1,4250,0.9938823529411764,0.9938823529411764
+Logistic Regression (class_weight=balanced),2,8500,0.4971764705882353,0.9943529411764706
+Logistic Regression (class_weight=balanced),5,21250,0.19891764705882353,0.9945882352941177
+Logistic Regression (class_weight=balanced),10,42500,0.09952941176470588,0.9952941176470588
+"Ridge-penalized Logistic Regression (L2, C=0.1)",1,4250,0.9938823529411764,0.9938823529411764
+"Ridge-penalized Logistic Regression (L2, C=0.1)",2,8500,0.4971764705882353,0.9943529411764706
+"Ridge-penalized Logistic Regression (L2, C=0.1)",5,21250,0.19891764705882353,0.9945882352941177
+"Ridge-penalized Logistic Regression (L2, C=0.1)",10,42500,0.09952941176470588,0.9952941176470588
+"Lasso-penalized Logistic Regression (L1, C=0.1)",1,4250,0.9938823529411764,0.9938823529411764
+"Lasso-penalized Logistic Regression (L1, C=0.1)",2,8500,0.4971764705882353,0.9943529411764706
+"Lasso-penalized Logistic Regression (L1, C=0.1)",5,21250,0.19891764705882353,0.9945882352941177
+"Lasso-penalized Logistic Regression (L1, C=0.1)",10,42500,0.09952941176470588,0.9952941176470588
+HistGradientBoosting (class_weight=balanced),1,4250,0.9988235294117647,0.9988235294117647
+HistGradientBoosting (class_weight=balanced),2,8500,0.49976470588235294,0.9995294117647059
+HistGradientBoosting (class_weight=balanced),5,21250,0.19990588235294118,0.9995294117647059
+HistGradientBoosting (class_weight=balanced),10,42500,0.09995294117647059,0.9995294117647059

@@ -18,19 +18,25 @@ patterns that are strong real-world fraud signals.
 
 ## Results
 
-| Model | PR-AUC | ROC-AUC | Precision@21,250 |
-|---|---|---|---|
-| HistGradientBoosting (class_weight=balanced) | 0.9995 | 0.9999 | 0.200 |
-| Logistic Regression (class_weight=balanced) | 0.9946 | 0.9991 | 0.199 |
-| Ridge-penalized Logistic Regression (L2) | 0.9946 | 0.9990 | 0.199 |
-| Lasso-penalized Logistic Regression (L1) | 0.9945 | 0.9986 | 0.199 |
+| Model | PR-AUC | ROC-AUC | Precision@K (K=1x fraud count) | Recall@K (K=1x fraud count) |
+|---|---|---|---|---|
+| HistGradientBoosting (class_weight=balanced) | 0.9995 | 0.9999 | 0.999 | 0.999 |
+| Logistic Regression (class_weight=balanced) | 0.9946 | 0.9991 | 0.994 | 0.994 |
+| Ridge-penalized Logistic Regression (L2) | 0.9946 | 0.9990 | 0.994 | 0.994 |
+| Lasso-penalized Logistic Regression (L1) | 0.9945 | 0.9986 | 0.994 | 0.994 |
 
-**PR-AUC alone overstates how usable this is.** At the operating point that
-would flag the top 21,250 highest-risk transactions, only ~1 in 5 flagged
-transactions is actually fraud — 80% false positives. Ranking is strong;
-the decision threshold isn't yet tuned to a realistic review-queue budget.
-Closing that gap (velocity/graph features, SHAP-driven error analysis,
-threshold tuning) is the next body of work — see `ROADMAP.md`.
+Precision@K depends on both the model and where K is set relative to the
+true fraud count, so it's reported here at K = the test set's actual fraud
+volume (the realistic "review queue sized to daily fraud volume" operating
+point) rather than at an arbitrary multiple. Full curve — Precision@K and
+Recall@K at K in {1x, 2x, 5x, 10x} true fraud count, per model — is in
+`data/processed/precision_recall_at_k.csv`. At 5x (K=21,250, sized as a
+padded review queue rather than a tight one), HistGradientBoosting still
+catches 99.95% of fraud (Recall@K), but only 1 in 5 flagged transactions is
+actually fraud (Precision@K=0.200) — a direct, expected consequence of
+padding K to 5x the true fraud count, not a ranking weakness. Sprint 2
+(velocity/graph features, SHAP-driven error analysis, threshold tuning at a
+capacity-based K) is still the next body of work — see `ROADMAP.md`.
 
 ## Project structure
 
@@ -48,7 +54,7 @@ fraud-detection-project/
 │   ├── config.py               # loads config.yaml
 │   ├── generate_sample_data.py # builds a schema-accurate synthetic sample for local dev
 │   ├── features.py             # feature engineering as a DuckDB SQL query
-│   ├── custom_metrics.py       # weighted BCE loss + Precision@K
+│   ├── custom_metrics.py       # weighted BCE loss + Precision@K / Recall@K
 │   └── train_pipeline.py       # main training + evaluation pipeline
 ├── config.yaml                 # paths, split, and model hyperparameters
 ├── requirements.txt

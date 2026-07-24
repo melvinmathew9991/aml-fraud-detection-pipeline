@@ -73,6 +73,29 @@ def precision_at_k(y_true: np.ndarray, y_pred_proba: np.ndarray, k: int) -> floa
     return float(y_true[top_k_idx].sum() / k)
 
 
+def recall_at_k(y_true: np.ndarray, y_pred_proba: np.ndarray, k: int) -> float:
+    """
+    Recall@K: of all actual fraud cases, what fraction landed in the top-K
+    highest-risk transactions?
+
+    Precision@K on its own is easy to misread as a model quality score, but
+    it is a function of *both* the model and how K was chosen relative to
+    the true positive count -- e.g. picking K = 5x the number of frauds
+    mathematically caps precision at 20% even if the model ranks every
+    single fraud first (recall@K = 100%). Reporting recall@K alongside it
+    is what tells you which of those two you're actually looking at.
+    """
+    if k <= 0 or k > len(y_true):
+        raise ValueError(f"k must be between 1 and {len(y_true)}, got {k}")
+
+    n_pos = y_true.sum()
+    if n_pos == 0:
+        return float("nan")
+
+    top_k_idx = np.argsort(y_pred_proba)[::-1][:k]
+    return float(y_true[top_k_idx].sum() / n_pos)
+
+
 if __name__ == "__main__":
     # Quick self-test with synthetic data
     rng = np.random.default_rng(42)
@@ -86,3 +109,5 @@ if __name__ == "__main__":
     print(f"Unweighted (pos_weight=1) BCE loss: {weighted_bce_loss(y_true, y_pred, pos_weight=1.0):.4f}")
     print(f"Precision@10: {precision_at_k(y_true, y_pred, k=10):.3f}")
     print(f"Precision@50: {precision_at_k(y_true, y_pred, k=50):.3f}")
+    print(f"Recall@10:    {recall_at_k(y_true, y_pred, k=10):.3f}")
+    print(f"Recall@50:    {recall_at_k(y_true, y_pred, k=50):.3f}")
