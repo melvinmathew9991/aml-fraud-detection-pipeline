@@ -1,0 +1,16 @@
+{
+  "bundle_version": "v1",
+  "feature_version": 18,
+  "n_features": 18,
+  "git_commit": "b874804-dirty",
+  "run_id": "20260801T130131Z",
+  "model_name": "LightGBM (tuned)",
+  "model_artifact_key": "lightgbm_tuned",
+  "trained_at": "20260801T130131Z",
+  "sha256": {
+    "model.txt": "2703714e9834fb1f8d7dc3578f2ba0841a33ac6f41c591396b07953f70c45a0f",
+    "scaler.json": "720928aaa89407b83bb49d4df06030c770583cf58195ee385aca19c49d60e90e",
+    "threshold.json": "5ecb554ef24e7a2a96c6cfa0eb842b2bab611a7e964415cd1105f3a79d66c116",
+    "dest_state.parquet": "af8768e6477150f2431f33fe54d69fb8cb4745fc61ec7af9d33b4d6fb5b1b6c2"
+  }
+}

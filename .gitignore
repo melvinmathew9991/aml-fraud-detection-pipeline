@@ -8,6 +8,12 @@ data/processed/*.duckdb
 # Model artifacts and run metadata (regenerate via training; run-specific)
 models/**
 
+# EXCEPT the versioned serving bundle -- this is a committed release
+# artifact (~7MB), not a run output. See ARCHITECTURE.md §3. Forgetting
+# this negation is the exact defect class the Sprint 1 audit caught
+# (evidence cited in docs but never actually tracked).
+!model_bundle/
+
 # Logs
 reports/*.log
 

@@ -1,0 +1,9 @@
+# Streamlit Community Cloud dependencies (Sprint 5). Lives in dashboard/
+# because Streamlit Cloud resolves requirements.txt relative to the app
+# directory, not the repo root -- see ARCHITECTURE.md §3. No model or
+# feature-engineering libraries: the dashboard talks to the API over HTTP
+# and reads precomputed CSVs, it never scores anything itself.
+streamlit==1.60.0
+pandas==2.3.3
+plotly==6.9.0
+requests==2.34.2
