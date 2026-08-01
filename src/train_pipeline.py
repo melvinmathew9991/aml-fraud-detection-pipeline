@@ -20,18 +20,28 @@ End-to-end training pipeline demonstrating:
   weighted-BCE loss from custom_metrics.py (both approaches, so the
   difference between "using a library flag" and "writing the loss yourself"
   is demonstrable)
-- Precision@K-based model selection (K=1x true fraud count, the realistic
-  review-queue operating point) rather than PR-AUC alone -- the two were
-  found to disagree post-tuning (see README), and this project's own
-  thesis is that Precision@K is the operationally relevant metric
+- Capacity-based model selection (Sprint 2): `best_model` is chosen by mean
+  precision at the review-capacity operating point -- not by PR-AUC, and no
+  longer by Precision@K=1x-fraud-count either. Sprint 1 had already moved
+  selection off PR-AUC (the two disagree post-tuning, see README); Sprint 2
+  moved it again because K=1x is defined by the labels, so "the model that
+  wins at K=1x" is not a criterion you could evaluate on the day you had to
+  deploy. Both the PR-AUC and K=1x rankings are still reported when they
+  disagree with the capacity winner
 - Precision@K / Recall@K as the operationally-relevant evaluation metrics
 - Optuna hyperparameter tuning (XGBoost/LightGBM only) optimizing mean PR-AUC
   across all CV folds (not a single fold -- one fold turned out to be
   near-perfectly separable and gave Optuna no signal to discriminate trials
   on), then refit with best params across all folds so the comparison table
   shows a visible tuned-vs-default delta
-- MLflow local file-store tracking (file:./mlruns) so runs are comparable
-  over time instead of overwriting a single CSV
+- MLflow local sqlite tracking so runs are comparable over time instead of
+  overwriting a single CSV
+- (Sprint 2) A deployable decision threshold set from analyst review capacity
+  rather than from the true fraud count -- see src/threshold.py for why the
+  distinction matters -- plus SHAP explainability (src/explain.py), top-K
+  error analysis (src/error_analysis.py), and a feature ablation that
+  attributes Sprint 2's metric movement to the new features instead of
+  asserting it
 """
 
 import json
@@ -54,8 +64,14 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from config import load_config, PROJECT_ROOT
 from cv import time_based_folds
-from features import feature_query, FEATURE_COLUMNS, FEATURE_VERSION
+from features import (
+    feature_query, FEATURE_COLUMNS, BASE_FEATURE_COLUMNS, FEATURE_VERSION,
+    TYPE_FEATURE_COLUMNS, DEST_FEATURE_COLUMNS,
+)
 from custom_metrics import weighted_bce_loss, suggest_pos_weight, precision_at_k, recall_at_k
+from threshold import capacity_k, operating_point, window_days, capacity_sweep
+from explain import compute_shap, global_importance, explain_queue, log_global_importance
+from error_analysis import segment_profile, missed_fraud_ranking, log_error_analysis
 
 # Optuna's own per-trial INFO logging would interleave with the pipeline's
 # log stream; tune_model() below logs its own summary line per study instead.
@@ -212,6 +228,14 @@ def build_feature_frame():
 
     con = duckdb.connect(str(DB_PATH))
     try:
+        # Cap DuckDB's memory before any query runs. Its default is ~80% of
+        # system RAM (~6.4GB here), which leaves nothing for the Python side
+        # and is how full runs previously hung this machine; under an explicit
+        # limit DuckDB spills the window sorts to disk instead.
+        duckdb_cfg = CONFIG.get("duckdb", {})
+        con.execute(f"SET memory_limit='{duckdb_cfg.get('memory_limit', '2GB')}'")
+        con.execute(f"SET threads={duckdb_cfg.get('threads', 2)}")
+
         transactions_reloaded = _ensure_transactions_table(con, RAW_PATH)
         log_memory("after ensure transactions table")
 
@@ -393,7 +417,7 @@ def tune_model(name, objective_fn, fold_data, n_trials, random_state):
 K_FRAUD_MULTIPLIERS = [1, 2, 5, 10]
 
 
-def evaluate_model(name, y_test, y_proba, pos_weight):
+def evaluate_model(name, y_test, y_proba, pos_weight, k_capacity):
     pr_auc = average_precision_score(y_test, y_proba)
     roc_auc = roc_auc_score(y_test, y_proba) if y_test.sum() > 0 else float("nan")
     w_bce = weighted_bce_loss(y_test, y_proba, pos_weight=pos_weight)
@@ -404,12 +428,22 @@ def evaluate_model(name, y_test, y_proba, pos_weight):
     p_at_k = precision_at_k(y_test, y_proba, k=k)
     r_at_k = recall_at_k(y_test, y_proba, k=k)
 
+    # Sprint 2: the deployable operating point. Unlike every K above, this one
+    # is derived from analyst review capacity rather than the (in production,
+    # unknowable) true fraud count -- see src/threshold.py.
+    op = operating_point(y_test, y_proba, k_capacity)
+
     logger.info("--- %s ---", name)
     logger.info("  PR-AUC:              %.4f  (primary metric under class imbalance)", pr_auc)
     logger.info("  ROC-AUC:             %.4f  (reported, but misleading alone at this imbalance)", roc_auc)
     logger.info("  Weighted BCE loss:   %.4f", w_bce)
     logger.info("  Precision@%d:          %.4f  (of top-%d flagged, fraction actually fraud)", k, p_at_k, k)
     logger.info("  Recall@%d:             %.4f  (of all fraud, fraction caught in top-%d)", k, r_at_k, k)
+    logger.info("  At review capacity (K=%d, threshold=%.6f): precision=%.4f  recall=%.4f  "
+                "alert_rate=%.4f%%  [%d TP / %d FP / %d missed]",
+                op["k"], op["threshold"], op["precision"], op["recall"],
+                100 * op["alert_rate"], op["true_positives"], op["false_positives"],
+                op["false_negatives"])
 
     curve_rows = []
     for m in K_FRAUD_MULTIPLIERS:
@@ -426,7 +460,12 @@ def evaluate_model(name, y_test, y_proba, pos_weight):
 
     return {"model": name, "pr_auc": pr_auc, "roc_auc": roc_auc,
             "weighted_bce": w_bce, "precision_at_k": p_at_k, "recall_at_k": r_at_k,
-            "k": k, "n_test_fraud": n_test_fraud}, curve_rows
+            "k": k, "n_test_fraud": n_test_fraud,
+            "capacity_k": op["k"], "capacity_threshold": op["threshold"],
+            "capacity_precision": op["precision"], "capacity_recall": op["recall"],
+            "capacity_alert_rate": op["alert_rate"],
+            "capacity_false_positives": op["false_positives"],
+            "capacity_false_negatives": op["false_negatives"]}, curve_rows
 
 
 def main():
@@ -446,13 +485,28 @@ def main():
     logger.info("Built %d expanding-window time-based folds (boundaries=%s)",
                 n_folds, CONFIG["cv"]["fold_boundaries"])
 
+    reviews_per_day = CONFIG["review_capacity"]["reviews_per_day"]
+
     fold_data = []
+    fold_capacity_k = []
     for fold_idx, (train_mask, test_mask) in enumerate(folds, start=1):
         prepared = prepare_fold(X, y, train_mask, test_mask, sampling_cfg, random_state)
         _, _, y_train, y_test, _, pos_weight, _ = prepared
+
+        # Review capacity for this fold's window, from staffing and elapsed
+        # time only -- deliberately independent of y_test (see threshold.py).
+        step_test = step[test_mask]
+        k_cap = capacity_k(step_test, reviews_per_day, n_rows=len(y_test))
+        fold_capacity_k.append(k_cap)
+
         logger.info(
             "Fold %d/%d: train=%d rows (%d fraud), test=%d rows (%d fraud), pos_weight=%.1f",
             fold_idx, n_folds, len(y_train), y_train.sum(), len(y_test), y_test.sum(), pos_weight,
+        )
+        logger.info(
+            "  Test window spans %.1f days -> review capacity K=%d at %d reviews/day "
+            "(%d actual fraud in window)",
+            window_days(step_test), k_cap, reviews_per_day, int(y_test.sum()),
         )
         fold_data.append(prepared)
     log_memory("all folds prepared")
@@ -460,9 +514,14 @@ def main():
     results = []
     curve_rows = []
     final_fold_models = {}
+    # Display name -> artifact key, so the selected model can be looked up in
+    # final_fold_models later (results tables carry the display name only).
+    model_key_by_name = {}
 
     def record(name, model_key, fold_idx, y_test, y_proba, pos_weight):
-        result, rows = evaluate_model(name, y_test, y_proba, pos_weight)
+        result, rows = evaluate_model(name, y_test, y_proba, pos_weight,
+                                       k_capacity=fold_capacity_k[fold_idx - 1])
+        model_key_by_name[name] = model_key
         result["fold"] = fold_idx
         for row in rows:
             row["fold"] = fold_idx
@@ -478,6 +537,9 @@ def main():
             "n_folds": n_folds,
             "fold_boundaries": str(CONFIG["cv"]["fold_boundaries"]),
             "git_commit": git_commit_hash(),
+            "feature_version": FEATURE_VERSION,
+            "n_features": len(feature_names),
+            "reviews_per_day": reviews_per_day,
         })
 
         for fold_idx, (X_train, X_test, y_train, y_test, scaler, pos_weight, train_pos_weight) in enumerate(fold_data, start=1):
@@ -569,10 +631,14 @@ def main():
                 weighted_bce_mean=("weighted_bce", "mean"),
                 precision_at_k_mean=("precision_at_k", "mean"), precision_at_k_std=("precision_at_k", "std"),
                 recall_at_k_mean=("recall_at_k", "mean"), recall_at_k_std=("recall_at_k", "std"),
+                capacity_precision_mean=("capacity_precision", "mean"),
+                capacity_precision_std=("capacity_precision", "std"),
+                capacity_recall_mean=("capacity_recall", "mean"),
+                capacity_recall_std=("capacity_recall", "std"),
                 n_folds=("fold", "count"),
             )
             .reset_index()
-            .sort_values("pr_auc_mean", ascending=False)
+            .sort_values("capacity_precision_mean", ascending=False)
         )
         summary_df.to_csv(PROCESSED_DIR / "model_comparison.csv", index=False)
 
@@ -589,30 +655,161 @@ def main():
         curve_summary_df.to_csv(PROCESSED_DIR / "precision_recall_at_k.csv", index=False)
         logger.info("Saved fold-level and aggregated comparison tables to %s", PROCESSED_DIR)
 
-        # best_model is selected by mean Precision@K at the realistic
-        # K=1x-true-fraud-count operating point, NOT by mean PR-AUC -- this
-        # project's own thesis throughout is that Precision@K is the
-        # operationally relevant metric (a fraud team reviews a fixed-size
-        # queue, not a probability ranking), and PR-AUC and Precision@K@1x
-        # were found to disagree (see README): Optuna's PR-AUC-only
-        # objective can find hyperparameters that rank fraud marginally
-        # better while calibrating worse and doing no better (or worse) on
-        # the metric that actually matters operationally.
+        # best_model is selected by mean precision at the REVIEW-CAPACITY
+        # operating point, not by PR-AUC and (since Sprint 2) no longer by
+        # Precision@K=1x-fraud-count either.
+        #
+        # Sprint 1 already moved selection off PR-AUC, on the argument that a
+        # fraud team works a fixed-size queue rather than a probability
+        # ranking. Sprint 2 finishes that argument: K=1x-fraud-count is still
+        # defined by the labels, so "the model that wins at K=1x" is a
+        # criterion you could not evaluate on the day you had to deploy it.
+        # K from review capacity has the same operational shape and IS
+        # computable in advance, so it is what selection now uses. The
+        # PR-AUC and K=1x rankings are still reported when they disagree.
+        capacity_ranked = summary_df.sort_values("capacity_precision_mean", ascending=False)
+        best_model_name = capacity_ranked.iloc[0]["model"]
+
         k1_df = curve_summary_df[curve_summary_df["k_multiplier"] == 1].sort_values(
             "precision_at_k_mean", ascending=False
         )
-        best_model_name = k1_df.iloc[0]["model"]
-        top_pr_auc_model = summary_df.iloc[0]["model"]
+        top_pr_auc_model = summary_df.sort_values("pr_auc_mean", ascending=False).iloc[0]["model"]
+        top_k1_model = k1_df.iloc[0]["model"]
+
         logger.info(
-            "Best model by mean Precision@K (K=1x fraud count) across %d folds: %s (%.4f +/- %.4f)",
-            n_folds, best_model_name, k1_df.iloc[0]["precision_at_k_mean"], k1_df.iloc[0]["precision_at_k_std"],
+            "Best model by mean precision at review capacity (%d reviews/day) across %d folds: "
+            "%s (%.4f +/- %.4f)",
+            reviews_per_day, n_folds, best_model_name,
+            capacity_ranked.iloc[0]["capacity_precision_mean"],
+            capacity_ranked.iloc[0]["capacity_precision_std"],
         )
-        if top_pr_auc_model != best_model_name:
-            logger.info(
-                "  (Note: %s has the highest mean PR-AUC (%.4f) but isn't the Precision@K winner -- "
-                "PR-AUC and Precision@K@1x disagree here; see README 'Optuna improved ranking but hurt calibration'.)",
-                top_pr_auc_model, summary_df.iloc[0]["pr_auc_mean"],
+        for label, other in (("mean PR-AUC", top_pr_auc_model),
+                             ("mean Precision@K=1x fraud count", top_k1_model)):
+            if other != best_model_name:
+                logger.info("  (Note: %s leads on %s but is not the capacity-metric winner.)",
+                            other, label)
+
+        # --- Sprint 2: explainability, error analysis, feature ablation ---
+        # All three run on the FINAL fold only: it has the most training data
+        # and the latest test window, so it is the closest thing here to
+        # "the model as it would be deployed". Running them per-fold would
+        # triple the cost for triplicate versions of the same narrative.
+        best_key = model_key_by_name[best_model_name]
+        best_model = final_fold_models[best_key]
+
+        X_tr_f, X_te_f, y_tr_f, y_te_f, scaler_f, pos_w_f, train_pos_w_f = fold_data[-1]
+        final_test_mask = folds[-1][1]
+        X_raw_test = X.loc[final_test_mask].reset_index(drop=True)
+        best_proba = best_model.predict_proba(X_te_f)[:, 1]
+        final_k = fold_capacity_k[-1]
+        final_op = operating_point(y_te_f, best_proba, final_k)
+
+        logger.info("=== Sprint 2 analysis on final fold, model = %s ===", best_model_name)
+        logger.info("  Deployable operating point: threshold=%.6f at K=%d (%d reviews/day)",
+                    final_op["threshold"], final_op["k"], reviews_per_day)
+
+        # -- SHAP --
+        explain_cfg = CONFIG["explainability"]
+        shap_global_df = pd.DataFrame()
+        alert_reasons_df = pd.DataFrame()
+        try:
+            shap_values, _shap_idx = compute_shap(
+                best_model, X_te_f, max_rows=explain_cfg["shap_sample_rows"],
+                random_state=random_state,
             )
+            shap_global_df = global_importance(shap_values, feature_names)
+            log_global_importance(shap_global_df)
+            shap_global_df.to_csv(PROCESSED_DIR / "shap_global_importance.csv", index=False)
+
+            alert_reasons_df = explain_queue(
+                best_model, X_te_f, y_te_f, best_proba, scaler_f, feature_names,
+                threshold=final_op["threshold"],
+                max_alerts=explain_cfg["max_explained_alerts"],
+                top_features=explain_cfg["reasons_per_alert"],
+                random_state=random_state,
+            )
+            alert_reasons_df.to_csv(PROCESSED_DIR / "shap_alert_reasons.csv", index=False)
+            logger.info("  Wrote per-alert reason codes for %d alerts to shap_alert_reasons.csv",
+                        alert_reasons_df["alert_rank"].nunique() if len(alert_reasons_df) else 0)
+        except Exception as exc:
+            # TreeSHAP only covers tree ensembles. If a linear baseline ever
+            # wins selection, log it and carry on rather than losing the run.
+            logger.warning("  SHAP explainability skipped for %s: %s", best_model_name, exc)
+        log_memory("shap complete")
+
+        # -- Error analysis --
+        profile_df = segment_profile(X_raw_test, y_te_f, best_proba, final_op["threshold"])
+        # n_flagged, not final_k: ties at the threshold can flag more rows than
+        # K requested, and this has to describe the same queue segment_profile
+        # does (see missed_fraud_ranking's docstring).
+        missed = missed_fraud_ranking(y_te_f, best_proba, final_op["n_flagged"])
+        log_error_analysis(profile_df, missed)
+        profile_df.to_csv(PROCESSED_DIR / "error_analysis_profile.csv", index=False)
+        pd.DataFrame([missed]).to_csv(PROCESSED_DIR / "missed_fraud_summary.csv", index=False)
+
+        # -- Capacity sweep --
+        # Threshold "tuning" here means showing what each staffing level buys,
+        # not picking one number and calling it optimal -- the trade-off is a
+        # business decision, and the ceiling built into it (see
+        # threshold.capacity_sweep) is the part most easily misread.
+        sweep_rows = capacity_sweep(
+            y_te_f, best_proba, step[final_test_mask],
+            CONFIG["review_capacity"]["sweep_reviews_per_day"],
+        )
+        sweep_df = pd.DataFrame(sweep_rows)
+        sweep_df.to_csv(PROCESSED_DIR / "capacity_sweep.csv", index=False)
+        logger.info("  Operating point vs review capacity (final fold, %d fraud in %.1f days):",
+                    int(y_te_f.sum()), window_days(step[final_test_mask]))
+        logger.info("    %9s %8s %10s %9s %8s %11s %s",
+                    "reviews/d", "K", "threshold", "precision", "recall", "ceiling", "")
+        for row in sweep_rows:
+            logger.info("    %9.0f %8d %10.6f %9.4f %8.4f %11.4f %s",
+                        row["reviews_per_day"], row["k"], row["threshold"],
+                        row["precision"], row["recall"], row["precision_ceiling"],
+                        "<- at ceiling" if row["at_ceiling"] else "")
+
+        # -- Feature ablation --
+        # Attributes this sprint's metric movement to the new features rather
+        # than asserting it, and splits the two independent feature groups so
+        # a gain from one is not credited to the other. StandardScaler is
+        # per-column independent, so column-subsetting the already-scaled
+        # matrix is identical to having fitted a scaler on that subset alone
+        # -- no refit needed.
+        def cols_for(*groups):
+            names = list(BASE_FEATURE_COLUMNS)
+            for g in groups:
+                names += list(g)
+            return [feature_names.index(c) for c in names]
+
+        ablation_rows = []
+        for label, cols in (
+            ("sprint1_features_only", cols_for()),
+            ("base_plus_txn_type", cols_for(TYPE_FEATURE_COLUMNS)),
+            ("base_plus_dest_aggregates", cols_for(DEST_FEATURE_COLUMNS)),
+            ("sprint2_all_features", cols_for(TYPE_FEATURE_COLUMNS, DEST_FEATURE_COLUMNS)),
+        ):
+            abl_model = fit_lightgbm(X_tr_f[:, cols], y_tr_f, X_te_f[:, cols], y_te_f,
+                                      train_pos_w_f)
+            abl_proba = abl_model.predict_proba(X_te_f[:, cols])[:, 1]
+            abl_op = operating_point(y_te_f, abl_proba, final_k)
+            ablation_rows.append({
+                "feature_set": label,
+                "n_features": len(cols),
+                "pr_auc": average_precision_score(y_te_f, abl_proba),
+                "weighted_bce": weighted_bce_loss(y_te_f, abl_proba, pos_weight=pos_w_f),
+                "capacity_precision": abl_op["precision"],
+                "capacity_recall": abl_op["recall"],
+                "capacity_false_positives": abl_op["false_positives"],
+                "capacity_false_negatives": abl_op["false_negatives"],
+            })
+        ablation_df = pd.DataFrame(ablation_rows)
+        ablation_df.to_csv(PROCESSED_DIR / "feature_ablation.csv", index=False)
+        logger.info("  Feature ablation (LightGBM defaults, final fold, K=%d):", final_k)
+        for row in ablation_rows:
+            logger.info("    %-22s %2d features -> PR-AUC %.4f  capacity precision %.4f  recall %.4f",
+                        row["feature_set"], row["n_features"], row["pr_auc"],
+                        row["capacity_precision"], row["capacity_recall"])
+        log_memory("sprint 2 analysis complete")
 
         # Persist every final-fold model plus the shared scaler and run
         # metadata -- final fold has the most training data and is the most
@@ -633,15 +830,54 @@ def main():
             "xgboost_best_params": xgb_study.best_params,
             "lightgbm_best_params": lgb_study.best_params,
             "best_model": best_model_name,
-            "best_model_selection_metric": "mean_precision_at_k_1x_fraud_count",
+            "best_model_artifact": best_key,
+            "best_model_selection_metric": "mean_precision_at_review_capacity",
             "top_pr_auc_model": top_pr_auc_model,
+            "top_precision_at_k_1x_model": top_k1_model,
+            # The deployable decision rule: score a transaction with
+            # best_model_artifact, flag it if the probability is >= this
+            # threshold. Derived from review capacity on the final fold, so
+            # it carries no knowledge of the labels.
+            "review_capacity_per_day": reviews_per_day,
+            "decision_threshold": final_op["threshold"],
+            "decision_threshold_fold": n_folds,
+            "decision_threshold_k": final_op["k"],
+            "expected_precision_at_threshold": final_op["precision"],
+            "expected_recall_at_threshold": final_op["recall"],
+            "expected_alert_rate": final_op["alert_rate"],
+            # Once recall saturates, precision at capacity is bounded above by
+            # total_fraud / (alerts actually flagged). Recorded so the headline
+            # precision is never read without the ceiling it is being measured
+            # against. Divides by n_flagged rather than k for the tie reason
+            # documented in threshold.capacity_sweep.
+            "precision_ceiling_at_threshold": (
+                min(1.0, final_op["total_fraud"] / final_op["n_flagged"])
+                if final_op["n_flagged"] else None
+            ),
+            "capacity_sweep": sweep_rows,
+            "shap_top_features": (
+                shap_global_df.head(5)["feature"].tolist() if len(shap_global_df) else []
+            ),
+            "feature_ablation": ablation_rows,
+            "missed_fraud_summary": missed,
             "results_by_fold": results,
         }
         with open(run_dir / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=2, default=str)
 
-        mlflow.log_artifact(str(PROCESSED_DIR / "model_comparison.csv"))
-        mlflow.log_artifact(str(PROCESSED_DIR / "precision_recall_at_k.csv"))
+        mlflow.log_metrics({
+            "decision_threshold": final_op["threshold"],
+            "expected_precision_at_threshold": final_op["precision"],
+            "expected_recall_at_threshold": final_op["recall"],
+            "expected_alert_rate": final_op["alert_rate"],
+        })
+        for artifact in ("model_comparison.csv", "precision_recall_at_k.csv",
+                         "shap_global_importance.csv", "shap_alert_reasons.csv",
+                         "error_analysis_profile.csv", "feature_ablation.csv",
+                         "capacity_sweep.csv"):
+            path = PROCESSED_DIR / artifact
+            if path.exists():
+                mlflow.log_artifact(str(path))
         mlflow.log_artifact(str(run_dir / "metadata.json"))
 
         logger.info("Saved model artifacts + metadata to %s", run_dir)
