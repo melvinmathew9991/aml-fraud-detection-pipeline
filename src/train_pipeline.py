@@ -70,8 +70,12 @@ from features import (
 )
 from custom_metrics import weighted_bce_loss, suggest_pos_weight, precision_at_k, recall_at_k
 from threshold import capacity_k, operating_point, window_days, capacity_sweep
+from schema import validate_raw_sample
 from explain import compute_shap, global_importance, explain_queue, log_global_importance
 from error_analysis import segment_profile, missed_fraud_ranking, log_error_analysis
+from economics import (
+    net_value_curve, degeneracy_check, capacity_constraint_cost, ticket_size_crossover,
+)
 
 # Optuna's own per-trial INFO logging would interleave with the pipeline's
 # log stream; tune_model() below logs its own summary line per study instead.
@@ -238,6 +242,11 @@ def build_feature_frame():
 
         transactions_reloaded = _ensure_transactions_table(con, RAW_PATH)
         log_memory("after ensure transactions table")
+
+        if transactions_reloaded:
+            logger.info("Validating a sample of the raw table against RAW_TRANSACTION_SCHEMA...")
+            validate_raw_sample(con)
+            logger.info("  Raw data validation passed.")
 
         _ensure_features_table(con, RAW_PATH, transactions_reloaded)
         log_memory("after ensure features table")
@@ -546,19 +555,24 @@ def main():
             logger.info("=== Fold %d/%d ===", fold_idx, n_folds)
             fold_models = {}
 
-            logreg = LogisticRegression(**CONFIG["models"]["logistic_regression"])
+            logreg = LogisticRegression(random_state=random_state,
+                                         **CONFIG["models"]["logistic_regression"])
             logreg.fit(X_train, y_train)
             fold_models["logistic_regression"] = logreg
             record("Logistic Regression (class_weight=balanced)", "logistic_regression",
                    fold_idx, y_test, logreg.predict_proba(X_test)[:, 1], pos_weight)
 
-            ridge_lr = LogisticRegression(**CONFIG["models"]["ridge"])
+            ridge_lr = LogisticRegression(random_state=random_state, **CONFIG["models"]["ridge"])
             ridge_lr.fit(X_train, y_train)
             fold_models["ridge"] = ridge_lr
             record("Ridge-penalized Logistic Regression (L2, C=0.1)", "ridge",
                    fold_idx, y_test, ridge_lr.predict_proba(X_test)[:, 1], pos_weight)
 
-            lasso_lr = LogisticRegression(**CONFIG["models"]["lasso"])
+            # random_state matters here specifically: solver=saga (config.yaml) is
+            # a stochastic average-gradient method, unlike lbfgs above (deterministic
+            # regardless of seed) -- without a fixed seed this model's coefficients,
+            # and therefore its reported metrics, were not reproducible run to run.
+            lasso_lr = LogisticRegression(random_state=random_state, **CONFIG["models"]["lasso"])
             lasso_lr.fit(X_train, y_train)
             fold_models["lasso"] = lasso_lr
             n_nonzero = np.sum(lasso_lr.coef_ != 0)
@@ -811,6 +825,64 @@ def main():
                         row["capacity_precision"], row["capacity_recall"])
         log_memory("sprint 2 analysis complete")
 
+        # -- Economics (Sprint 3, ARCHITECTURE.md §0) --
+        # avg_fraud_amount is measured from the final fold's actual fraud
+        # transactions -- not assumed -- so the degeneracy check and
+        # crossover below are grounded in this run's real data.
+        econ_cfg = CONFIG["economics"]
+        avg_fraud_amount = float(X_raw_test.loc[y_te_f == 1, "amount"].mean())
+
+        econ_curve_df = net_value_curve(
+            sweep_rows, avg_fraud_amount,
+            cost_per_review=econ_cfg["cost_per_review"],
+            recovery_rate=econ_cfg["recovery_rate"],
+            liability_rate=econ_cfg["liability_rate"],
+        )
+        econ_curve_df.to_csv(PROCESSED_DIR / "capacity_economics.csv", index=False)
+
+        degeneracy_df = degeneracy_check(
+            sweep_rows, avg_fraud_amount,
+            recovery_rate_grid=econ_cfg["degeneracy_recovery_rate_grid"],
+            liability_rate=econ_cfg["liability_rate"],
+            low_reviews_per_day=econ_cfg["capacity_constraint_low_reviews_per_day"],
+            high_reviews_per_day=econ_cfg["capacity_constraint_high_reviews_per_day"],
+        )
+        constraint_cost = capacity_constraint_cost(
+            sweep_rows, avg_fraud_amount,
+            low_reviews_per_day=econ_cfg["capacity_constraint_low_reviews_per_day"],
+            high_reviews_per_day=econ_cfg["capacity_constraint_high_reviews_per_day"],
+        )
+        crossover_df = ticket_size_crossover(
+            sweep_rows, econ_cfg["ticket_size_grid"],
+            cost_per_review=econ_cfg["cost_per_review"],
+            recovery_rate=econ_cfg["recovery_rate"],
+            liability_rate=econ_cfg["liability_rate"],
+        )
+
+        logger.info("  Economics (avg_fraud_amount=%.0f measured from this fold's actual fraud):",
+                    avg_fraud_amount)
+        logger.info("    Naive-optimum degeneracy: break-even cost_per_review ranges %.0f-%.0f "
+                    "across recovery_rate %.2f-%.2f -- no plausible review cost approaches this, "
+                    "so full recall wins under every assumption (see README).",
+                    degeneracy_df["break_even_cost_per_review"].min(),
+                    degeneracy_df["break_even_cost_per_review"].max(),
+                    min(econ_cfg["degeneracy_recovery_rate_grid"]),
+                    max(econ_cfg["degeneracy_recovery_rate_grid"]))
+        logger.info("    Capacity constraint (%d vs %d reviews/day): %d frauds missed, "
+                    "%.0f exposure, %.0f per marginal seat",
+                    constraint_cost["low_reviews_per_day"], constraint_cost["high_reviews_per_day"],
+                    constraint_cost["frauds_missed_by_constraint"], constraint_cost["exposure"],
+                    constraint_cost["exposure_per_marginal_seat"])
+        transitions = crossover_df[crossover_df["is_crossover"]]
+        if len(transitions):
+            logger.info("    Ticket-size crossover(s):")
+            for _, row in transitions.iterrows():
+                logger.info("      at avg_fraud_amount=%.0f, recommended staffing changes to %d reviews/day",
+                            row["avg_fraud_amount"], row["recommended_reviews_per_day"])
+        else:
+            logger.info("    No ticket-size crossover across the swept grid -- "
+                        "full capacity wins at every grid point.")
+
         # Persist every final-fold model plus the shared scaler and run
         # metadata -- final fold has the most training data and is the most
         # representative single snapshot for a later serving step.
@@ -860,6 +932,18 @@ def main():
             ),
             "feature_ablation": ablation_rows,
             "missed_fraud_summary": missed,
+            "economics": {
+                "avg_fraud_amount": avg_fraud_amount,
+                "cost_per_review": econ_cfg["cost_per_review"],
+                "recovery_rate": econ_cfg["recovery_rate"],
+                "liability_rate": econ_cfg["liability_rate"],
+                "degeneracy_break_even_cost_per_review_range": [
+                    float(degeneracy_df["break_even_cost_per_review"].min()),
+                    float(degeneracy_df["break_even_cost_per_review"].max()),
+                ],
+                "capacity_constraint_cost": constraint_cost,
+                "ticket_size_crossovers": transitions.to_dict("records"),
+            },
             "results_by_fold": results,
         }
         with open(run_dir / "metadata.json", "w") as f:
@@ -874,7 +958,7 @@ def main():
         for artifact in ("model_comparison.csv", "precision_recall_at_k.csv",
                          "shap_global_importance.csv", "shap_alert_reasons.csv",
                          "error_analysis_profile.csv", "feature_ablation.csv",
-                         "capacity_sweep.csv"):
+                         "capacity_sweep.csv", "capacity_economics.csv"):
             path = PROCESSED_DIR / artifact
             if path.exists():
                 mlflow.log_artifact(str(path))

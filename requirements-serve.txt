@@ -1,0 +1,13 @@
+# Serving image only (Sprint 4's FastAPI service). Deliberately excludes
+# scikit-learn, shap, numba, llvmlite, duckdb, mlflow, optuna, and pandas --
+# see ARCHITECTURE.md §3 for why each is unnecessary at serving time (numpy
+# StandardScaler reimplementation, native LightGBM TreeSHAP via
+# pred_contrib=True, model.txt instead of joblib pickles). A CI job installs
+# ONLY this file and runs the inference tests, so an accidental training-only
+# import here fails loudly instead of silently bloating the deploy image.
+fastapi==0.141.1
+uvicorn==0.52.0
+pydantic==2.13.4
+numpy==2.4.6
+lightgbm==4.7.0
+pyarrow==24.0.0

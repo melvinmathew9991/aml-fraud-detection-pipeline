@@ -1,13 +1,13 @@
 model,k_multiplier,k,precision_at_k,recall_at_k,fold
-Logistic Regression (class_weight=balanced),1,887,0.5400225479143179,0.5400225479143179,1
+Logistic Regression (class_weight=balanced),1,887,0.5332581736189402,0.5332581736189402,1
 Logistic Regression (class_weight=balanced),2,1774,0.49492671927846676,0.9898534385569335,1
 Logistic Regression (class_weight=balanced),5,4435,0.1979706877113867,0.9898534385569335,1
 Logistic Regression (class_weight=balanced),10,8870,0.09898534385569335,0.9898534385569335,1
-"Ridge-penalized Logistic Regression (L2, C=0.1)",1,887,0.5050732807215332,0.5050732807215332,1
+"Ridge-penalized Logistic Regression (L2, C=0.1)",1,887,0.4983089064261556,0.4983089064261556,1
 "Ridge-penalized Logistic Regression (L2, C=0.1)",2,1774,0.49492671927846676,0.9898534385569335,1
 "Ridge-penalized Logistic Regression (L2, C=0.1)",5,4435,0.1979706877113867,0.9898534385569335,1
 "Ridge-penalized Logistic Regression (L2, C=0.1)",10,8870,0.09898534385569335,0.9898534385569335,1
-"Lasso-penalized Logistic Regression (L1, C=0.1)",1,887,0.47801578354002255,0.47801578354002255,1
+"Lasso-penalized Logistic Regression (L1, C=0.1)",1,887,0.5084554678692221,0.5084554678692221,1
 "Lasso-penalized Logistic Regression (L1, C=0.1)",2,1774,0.49492671927846676,0.9898534385569335,1
 "Lasso-penalized Logistic Regression (L1, C=0.1)",5,4435,0.1979706877113867,0.9898534385569335,1
 "Lasso-penalized Logistic Regression (L1, C=0.1)",10,8870,0.09898534385569335,0.9898534385569335,1
@@ -17,25 +17,25 @@ HistGradientBoosting (class_weight=balanced),5,4435,0.1979706877113867,0.9898534
 HistGradientBoosting (class_weight=balanced),10,8870,0.09898534385569335,0.9898534385569335,1
 XGBoost (default params),1,887,0.9898534385569335,0.9898534385569335,1
 XGBoost (default params),2,1774,0.49492671927846676,0.9898534385569335,1
-XGBoost (default params),5,4435,0.1979706877113867,0.9898534385569335,1
-XGBoost (default params),10,8870,0.09898534385569335,0.9898534385569335,1
+XGBoost (default params),5,4435,0.19819616685456595,0.9909808342728298,1
+XGBoost (default params),10,8870,0.09909808342728298,0.9909808342728298,1
 LightGBM (default params),1,887,0.9898534385569335,0.9898534385569335,1
 LightGBM (default params),2,1774,0.49492671927846676,0.9898534385569335,1
-LightGBM (default params),5,4435,0.19819616685456595,0.9909808342728298,1
-LightGBM (default params),10,8870,0.09909808342728298,0.9909808342728298,1
-Logistic Regression (class_weight=balanced),1,770,0.3922077922077922,0.3922077922077922,2
-Logistic Regression (class_weight=balanced),2,1540,0.42467532467532465,0.8493506493506493,2
-Logistic Regression (class_weight=balanced),5,3850,0.2,1.0,2
+LightGBM (default params),5,4435,0.1979706877113867,0.9898534385569335,1
+LightGBM (default params),10,8870,0.09898534385569335,0.9898534385569335,1
+Logistic Regression (class_weight=balanced),1,770,0.08051948051948052,0.08051948051948052,2
+Logistic Regression (class_weight=balanced),2,1540,0.07792207792207792,0.15584415584415584,2
+Logistic Regression (class_weight=balanced),5,3850,0.06545454545454546,0.32727272727272727,2
 Logistic Regression (class_weight=balanced),10,7700,0.1,1.0,2
-"Ridge-penalized Logistic Regression (L2, C=0.1)",1,770,0.2831168831168831,0.2831168831168831,2
-"Ridge-penalized Logistic Regression (L2, C=0.1)",2,1540,0.33766233766233766,0.6753246753246753,2
-"Ridge-penalized Logistic Regression (L2, C=0.1)",5,3850,0.2,1.0,2
+"Ridge-penalized Logistic Regression (L2, C=0.1)",1,770,0.07402597402597402,0.07402597402597402,2
+"Ridge-penalized Logistic Regression (L2, C=0.1)",2,1540,0.06233766233766234,0.12467532467532468,2
+"Ridge-penalized Logistic Regression (L2, C=0.1)",5,3850,0.06415584415584416,0.3207792207792208,2
 "Ridge-penalized Logistic Regression (L2, C=0.1)",10,7700,0.1,1.0,2
-"Lasso-penalized Logistic Regression (L1, C=0.1)",1,770,0.17532467532467533,0.17532467532467533,2
-"Lasso-penalized Logistic Regression (L1, C=0.1)",2,1540,0.237012987012987,0.474025974025974,2
-"Lasso-penalized Logistic Regression (L1, C=0.1)",5,3850,0.2,1.0,2
+"Lasso-penalized Logistic Regression (L1, C=0.1)",1,770,0.05974025974025974,0.05974025974025974,2
+"Lasso-penalized Logistic Regression (L1, C=0.1)",2,1540,0.05974025974025974,0.11948051948051948,2
+"Lasso-penalized Logistic Regression (L1, C=0.1)",5,3850,0.14337662337662338,0.7168831168831169,2
 "Lasso-penalized Logistic Regression (L1, C=0.1)",10,7700,0.1,1.0,2
-HistGradientBoosting (class_weight=balanced),1,770,0.9987012987012988,0.9987012987012988,2
+HistGradientBoosting (class_weight=balanced),1,770,0.9922077922077922,0.9922077922077922,2
 HistGradientBoosting (class_weight=balanced),2,1540,0.5,1.0,2
 HistGradientBoosting (class_weight=balanced),5,3850,0.2,1.0,2
 HistGradientBoosting (class_weight=balanced),10,7700,0.1,1.0,2
@@ -43,55 +43,55 @@ XGBoost (default params),1,770,1.0,1.0,2
 XGBoost (default params),2,1540,0.5,1.0,2
 XGBoost (default params),5,3850,0.2,1.0,2
 XGBoost (default params),10,7700,0.1,1.0,2
-LightGBM (default params),1,770,0.9987012987012988,0.9987012987012988,2
+LightGBM (default params),1,770,1.0,1.0,2
 LightGBM (default params),2,1540,0.5,1.0,2
 LightGBM (default params),5,3850,0.2,1.0,2
 LightGBM (default params),10,7700,0.1,1.0,2
-Logistic Regression (class_weight=balanced),1,4250,0.9621176470588235,0.9621176470588235,3
+Logistic Regression (class_weight=balanced),1,4250,0.9607058823529412,0.9607058823529412,3
 Logistic Regression (class_weight=balanced),2,8500,0.4971764705882353,0.9943529411764706,3
 Logistic Regression (class_weight=balanced),5,21250,0.19891764705882353,0.9945882352941177,3
-Logistic Regression (class_weight=balanced),10,42500,0.09948235294117647,0.9948235294117647,3
-"Ridge-penalized Logistic Regression (L2, C=0.1)",1,4250,0.9752941176470589,0.9752941176470589,3
+Logistic Regression (class_weight=balanced),10,42500,0.09950588235294118,0.9950588235294118,3
+"Ridge-penalized Logistic Regression (L2, C=0.1)",1,4250,0.9767058823529412,0.9767058823529412,3
 "Ridge-penalized Logistic Regression (L2, C=0.1)",2,8500,0.4971764705882353,0.9943529411764706,3
 "Ridge-penalized Logistic Regression (L2, C=0.1)",5,21250,0.19891764705882353,0.9945882352941177,3
-"Ridge-penalized Logistic Regression (L2, C=0.1)",10,42500,0.09952941176470588,0.9952941176470588,3
-"Lasso-penalized Logistic Regression (L1, C=0.1)",1,4250,0.9936470588235294,0.9936470588235294,3
+"Ridge-penalized Logistic Regression (L2, C=0.1)",10,42500,0.0995529411764706,0.9955294117647059,3
+"Lasso-penalized Logistic Regression (L1, C=0.1)",1,4250,0.9938823529411764,0.9938823529411764,3
 "Lasso-penalized Logistic Regression (L1, C=0.1)",2,8500,0.4978823529411765,0.995764705882353,3
-"Lasso-penalized Logistic Regression (L1, C=0.1)",5,21250,0.1992,0.996,3
+"Lasso-penalized Logistic Regression (L1, C=0.1)",5,21250,0.19924705882352942,0.9962352941176471,3
 "Lasso-penalized Logistic Regression (L1, C=0.1)",10,42500,0.09969411764705882,0.9969411764705882,3
 HistGradientBoosting (class_weight=balanced),1,4250,0.9995294117647059,0.9995294117647059,3
 HistGradientBoosting (class_weight=balanced),2,8500,0.49976470588235294,0.9995294117647059,3
-HistGradientBoosting (class_weight=balanced),5,21250,0.2,1.0,3
-HistGradientBoosting (class_weight=balanced),10,42500,0.1,1.0,3
-XGBoost (default params),1,4250,0.9976470588235294,0.9976470588235294,3
+HistGradientBoosting (class_weight=balanced),5,21250,0.19990588235294118,0.9995294117647059,3
+HistGradientBoosting (class_weight=balanced),10,42500,0.09997647058823529,0.9997647058823529,3
+XGBoost (default params),1,4250,0.9974117647058823,0.9974117647058823,3
 XGBoost (default params),2,8500,0.5,1.0,3
 XGBoost (default params),5,21250,0.2,1.0,3
 XGBoost (default params),10,42500,0.1,1.0,3
-LightGBM (default params),1,4250,0.9990588235294118,0.9990588235294118,3
+LightGBM (default params),1,4250,0.9992941176470588,0.9992941176470588,3
 LightGBM (default params),2,8500,0.5,1.0,3
 LightGBM (default params),5,21250,0.2,1.0,3
 LightGBM (default params),10,42500,0.1,1.0,3
 XGBoost (tuned),1,887,0.9898534385569335,0.9898534385569335,1
-XGBoost (tuned),2,1774,0.4954904171364149,0.9909808342728298,1
-XGBoost (tuned),5,4435,0.1984216459977452,0.992108229988726,1
+XGBoost (tuned),2,1774,0.49492671927846676,0.9898534385569335,1
+XGBoost (tuned),5,4435,0.19819616685456595,0.9909808342728298,1
 XGBoost (tuned),10,8870,0.09932356257046224,0.9932356257046223,1
 LightGBM (tuned),1,887,0.9898534385569335,0.9898534385569335,1
-LightGBM (tuned),2,1774,0.49492671927846676,0.9898534385569335,1
-LightGBM (tuned),5,4435,0.19819616685456595,0.9909808342728298,1
-LightGBM (tuned),10,8870,0.09909808342728298,0.9909808342728298,1
-XGBoost (tuned),1,770,1.0,1.0,2
+LightGBM (tuned),2,1774,0.49661781285231116,0.9932356257046223,1
+LightGBM (tuned),5,4435,0.19864712514092447,0.9932356257046223,1
+LightGBM (tuned),10,8870,0.09932356257046224,0.9932356257046223,1
+XGBoost (tuned),1,770,0.9974025974025974,0.9974025974025974,2
 XGBoost (tuned),2,1540,0.5,1.0,2
 XGBoost (tuned),5,3850,0.2,1.0,2
 XGBoost (tuned),10,7700,0.1,1.0,2
-LightGBM (tuned),1,770,1.0,1.0,2
+LightGBM (tuned),1,770,0.9987012987012988,0.9987012987012988,2
 LightGBM (tuned),2,1540,0.5,1.0,2
 LightGBM (tuned),5,3850,0.2,1.0,2
 LightGBM (tuned),10,7700,0.1,1.0,2
-XGBoost (tuned),1,4250,0.9983529411764706,0.9983529411764706,3
-XGBoost (tuned),2,8500,0.5,1.0,3
+XGBoost (tuned),1,4250,0.9969411764705882,0.9969411764705882,3
+XGBoost (tuned),2,8500,0.49988235294117644,0.9997647058823529,3
 XGBoost (tuned),5,21250,0.2,1.0,3
 XGBoost (tuned),10,42500,0.1,1.0,3
-LightGBM (tuned),1,4250,0.9990588235294118,0.9990588235294118,3
+LightGBM (tuned),1,4250,0.9992941176470588,0.9992941176470588,3
 LightGBM (tuned),2,8500,0.5,1.0,3
 LightGBM (tuned),5,21250,0.2,1.0,3
 LightGBM (tuned),10,42500,0.1,1.0,3

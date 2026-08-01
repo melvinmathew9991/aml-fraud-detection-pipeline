@@ -44,11 +44,12 @@ decided by profiling the data, not by assumption -- see ACCOUNT STRUCTURE.
 #      one column. Fan-OUT per origin is degenerate for the same reason.
 #
 #   3. The pre-existing orig_prior_txn_count / orig_prior_avg_amount features
-#      are near-dead (nonzero on 0.15% of rows). They are deliberately kept
-#      rather than removed, so the Sprint 2 feature set is a superset of the
-#      Sprint 1 one and the comparison stays apples-to-apples -- and SHAP is
-#      expected to rank them near-worthless, which is a useful demonstration
-#      that the explainability layer catches dead weight.
+#      were near-dead (nonzero on 0.15% of rows). Sprint 2 kept them anyway,
+#      as a demonstration that SHAP's explainability layer would rank them
+#      near-worthless -- it did (exactly zero attribution, see README). With
+#      that demonstration made, Sprint 3 removes both: shipping two provably
+#      inert inputs in a deployed artifact is not defensible once the
+#      research narrative that justified keeping them is no longer the point.
 #
 # Destination-side repeat structure is real but confined to non-merchant
 # accounts: the 2,150,401 'M'-prefixed merchant destinations average 1.0005
@@ -63,7 +64,9 @@ decided by profiling the data, not by assumption -- see ACCOUNT STRUCTURE.
 # mtime/size, so a stale materialized table can't silently serve features
 # from an older version of this file.
 # v2 (Sprint 2): + transaction-type indicators, destination velocity/fan-in.
-FEATURE_VERSION = 2
+# v3 (Sprint 3): - orig_prior_txn_count, orig_prior_avg_amount (zero SHAP
+#   attribution -- see README/ARCHITECTURE §11). Serving feature count 20 -> 18.
+FEATURE_VERSION = 3
 
 # Velocity lookback in `step` units. PaySim's `step` is one simulated hour,
 # so this is a 24-hour trailing window.
@@ -77,7 +80,6 @@ BASE_FEATURE_COLUMNS = [
     "amount", "hour_of_day", "is_night",
     "orig_balance_delta", "dest_balance_delta", "orig_balance_mismatch",
     "orig_emptied", "amount_to_balance_ratio", "dest_is_merchant",
-    "orig_prior_txn_count", "orig_prior_avg_amount",
 ]
 
 # Sprint 2 additions, split into the two independent groups they form so the
@@ -117,15 +119,16 @@ def feature_query(table: str = "transactions") -> str:
 
     Leakage safety, per window:
 
-    `w_orig` / `w_dest` (ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
-        Each account's OWN PRIOR HISTORY ONLY -- the frame explicitly excludes
-        the current row, the SQL equivalent of the leakage-safety pattern
-        already used in the Clinical EMR and Nectar projects. Ties on `step`
-        (multiple transactions in the same simulated hour) are broken by
-        `row_id`, assigned once when the CSV is loaded into DuckDB, so
-        ordering is deterministic across runs. COUNT/AVG over an empty window
-        (an account's first transaction) return 0/NULL respectively; COALESCE
-        handles the NULL case the same way the old pandas `.fillna(0)` did.
+    `w_dest` (ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+        Each destination account's OWN PRIOR HISTORY ONLY -- the frame
+        explicitly excludes the current row, the SQL equivalent of the
+        leakage-safety pattern already used in the Clinical EMR and Nectar
+        projects. Ties on `step` (multiple transactions in the same simulated
+        hour) are broken by `row_id`, assigned once when the CSV is loaded
+        into DuckDB, so ordering is deterministic across runs. COUNT/AVG over
+        an empty window (an account's first transaction) return 0/NULL
+        respectively; COALESCE handles the NULL case the same way the old
+        pandas `.fillna(0)` did.
 
     `w_dest_velocity` (RANGE BETWEEN 24 PRECEDING AND 1 PRECEDING)
         A RANGE frame over `step` rather than a ROWS frame, so "last 24 hours"
@@ -155,8 +158,6 @@ def feature_query(table: str = "transactions") -> str:
             CAST(oldbalanceOrg > 0 AND newbalanceOrig = 0 AS TINYINT) AS orig_emptied,
             (amount / (oldbalanceOrg + 1)) AS amount_to_balance_ratio,
             CAST(nameDest LIKE 'M%' AS TINYINT) AS dest_is_merchant,
-            COUNT(*) OVER w_orig AS orig_prior_txn_count,
-            COALESCE(AVG(amount) OVER w_orig, 0) AS orig_prior_avg_amount,
 
             CAST(type = 'TRANSFER' AS TINYINT) AS is_transfer,
             CAST(type = 'CASH_OUT' AS TINYINT) AS is_cash_out,
@@ -177,10 +178,6 @@ def feature_query(table: str = "transactions") -> str:
             isFraud
         FROM {table}
         WINDOW
-            w_orig AS (
-                PARTITION BY nameOrig ORDER BY step, row_id
-                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-            ),
             w_dest AS (
                 PARTITION BY nameDest ORDER BY step, row_id
                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
