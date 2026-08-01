@@ -95,6 +95,56 @@ optuna:
   n_trials: 10
   direction: maximize
 
+review_capacity:
+  # Sprint 2. Every Precision@K figure before this was reported at
+  # K = <multiple> x the test window's TRUE fraud count -- fine for ranking
+  # models against each other, but not a deployable rule: the true fraud
+  # count for today's transactions is only knowable in hindsight, which is
+  # the very thing the model exists to predict. Analyst headcount, by
+  # contrast, is known in advance. K is therefore set as
+  # reviews_per_day x (days in the evaluation window), and the score
+  # threshold is read off at that K (see src/threshold.py).
+  #
+  # 500/day is roughly 1.9x the fraud actually present per day, which is
+  # stable across all three fold windows at 250-284 frauds/day -- i.e. a
+  # team staffed with real but not unlimited slack. Deliberately a round
+  # staffing number rather than anything derived from the labels.
+  #
+  # It does NOT correspond to one alert rate. Transaction volume per day
+  # varies ~5x across the fold windows (~401k, ~419k, ~77k -- PaySim's
+  # volume collapses in later steps while the folds are cut on `step`
+  # quantiles, so equal row counts span very unequal time), so the same
+  # 500/day yields alert rates of 0.125%, 0.119% and 0.647% respectively.
+  # An earlier version of this comment quoted "~205k transactions/day ->
+  # ~0.24% alert rate"; that was the whole-dataset average and matches no
+  # fold. See README "The capacity metric is not comparable across folds".
+  reviews_per_day: 500
+  # Staffing levels to sweep the operating point across (see
+  # threshold.capacity_sweep). Spans "far below the daily fraud volume" to
+  # "far above it" so the precision ceiling -- total_fraud/K, which binds
+  # once recall saturates -- is visible rather than something a single
+  # precision number quietly hides.
+  sweep_reviews_per_day: [100, 250, 500, 1000, 2000, 5000]
+
+explainability:
+  # SHAP is run on a sample, not all 6.36M rows: exact TreeSHAP cost scales
+  # with rows and this machine has 8GB total (see hardware notes). 20k rows
+  # is ample for stable global mean-|SHAP| rankings.
+  shap_sample_rows: 20000
+  # Per-alert reason codes are generated only for the highest-scoring alerts
+  # -- the ones an analyst opens first.
+  max_explained_alerts: 50
+  reasons_per_alert: 4
+
+duckdb:
+  # Explicit ceiling instead of DuckDB's default (~80% of system RAM, i.e.
+  # ~6.4GB here). The feature query runs several full-table window sorts;
+  # letting it believe it has 6.4GB is how this project previously hung the
+  # machine. Under this limit DuckDB spills to disk instead, which is slower
+  # but survives.
+  memory_limit: "2GB"
+  threads: 2
+
 mlflow:
   # Local SQLite backend -- no server. MLflow 3.x put the plain filesystem
   # backend ("file:./mlruns") into maintenance mode and refuses to write to
