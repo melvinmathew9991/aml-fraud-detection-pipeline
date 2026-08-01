@@ -126,6 +126,29 @@ review_capacity:
   # precision number quietly hides.
   sweep_reviews_per_day: [100, 250, 500, 1000, 2000, 5000]
 
+economics:
+  # Sprint 3 (ARCHITECTURE.md §0). Three business rates a fraud lead would
+  # actually argue about -- deliberately adjustable, not tuned to produce a
+  # nice-looking answer. Units match whatever `amount` is denominated in.
+  cost_per_review: 200
+  recovery_rate: 0.5
+  liability_rate: 1.0
+  # Swept in the degeneracy check to show the naive "find the optimum"
+  # framing never changes its answer across a wide range of assumptions --
+  # see README/ARCHITECTURE for the 85,000-161,875 break-even finding this
+  # grid reproduces.
+  degeneracy_recovery_rate_grid: [0.05, 0.1, 0.25, 0.5, 0.75, 1.0]
+  # The two capacity levels the constraint-cost question compares -- 250 is
+  # the "zero false positives" operating point from the Results writeup, 500
+  # is the configured review_capacity.reviews_per_day above.
+  capacity_constraint_low_reviews_per_day: 250
+  capacity_constraint_high_reviews_per_day: 500
+  # Spans UPI-scale tickets (hundreds to low thousands) up to and beyond
+  # PaySim's own ~1.57M average, so the crossover -- if any -- is visible
+  # rather than assumed not to exist.
+  ticket_size_grid: [100, 500, 1000, 2500, 5000, 10000, 25000, 50000,
+                      100000, 250000, 500000, 1000000, 2000000, 5000000]
+
 explainability:
   # SHAP is run on a sample, not all 6.36M rows: exact TreeSHAP cost scales
   # with rows and this machine has 8GB total (see hardware notes). 20k rows

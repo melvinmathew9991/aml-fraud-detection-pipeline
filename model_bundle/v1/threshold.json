@@ -1,0 +1,8 @@
+{
+  "decision_threshold": 8.077004481140283e-06,
+  "reviews_per_day": 500,
+  "fold": 3,
+  "expected_precision": 0.525664811379097,
+  "expected_recall": 1.0,
+  "precision_ceiling": 0.525664811379097
+}
