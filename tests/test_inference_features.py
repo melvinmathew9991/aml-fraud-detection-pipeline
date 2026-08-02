@@ -7,9 +7,13 @@ compared for agreement in test_skew_state.py / test_skew_plumbing.py.
 
 import pytest
 
-from inference.features import compute_dest_features, compute_features, compute_stateless_features
-from inference.state import COLD_START, DestState
 from features import FEATURE_COLUMNS
+from inference.features import (
+    compute_dest_features,
+    compute_features,
+    compute_stateless_features,
+)
+from inference.state import COLD_START, DestState
 
 
 def _empty_dest_state() -> DestState:
@@ -134,5 +138,5 @@ def test_compute_features_cold_start_destination_reports_state_hit_false():
 
 def test_compute_features_vector_order_matches_feature_columns():
     vector, values, _ = compute_features(BASE_TXN, _empty_dest_state())
-    for name, v in zip(FEATURE_COLUMNS, vector):
+    for name, v in zip(FEATURE_COLUMNS, vector, strict=True):
         assert v == values[name]

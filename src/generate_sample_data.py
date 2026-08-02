@@ -26,8 +26,8 @@ mobile money simulator for fraud detection. 28th European Modeling and
 Simulation Symposium (EMSS).
 """
 
-import random
 import csv
+import random
 from pathlib import Path
 
 random.seed(42)

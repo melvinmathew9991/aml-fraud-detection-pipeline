@@ -17,12 +17,10 @@ already cover.
 from types import SimpleNamespace
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import explain
 from explain import _binary_shap_values, explain_queue, global_importance
-
 
 # ------------------------------------------------------------ _binary_shap_values
 

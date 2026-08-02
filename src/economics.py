@@ -31,7 +31,6 @@ insight. Two non-degenerate questions instead:
      to low thousands per transaction) may be.
 """
 
-import numpy as np
 import pandas as pd
 
 

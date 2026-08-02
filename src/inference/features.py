@@ -40,7 +40,7 @@ reads.
 
 from typing import TypedDict
 
-from features import FEATURE_COLUMNS  # noqa: E402  (see conftest.py / __init__.py)
+from features import FEATURE_COLUMNS
 
 from .state import COLD_START, DestState
 
@@ -134,7 +134,11 @@ def compute_features(txn: RawTransaction, dest_state: DestState) -> tuple[list[f
 
 
 __all__ = [
-    "COLD_START", "RawTransaction", "VALID_TYPES",
-    "compute_stateless_features", "compute_dest_features", "assemble",
+    "COLD_START",
+    "VALID_TYPES",
+    "RawTransaction",
+    "assemble",
+    "compute_dest_features",
     "compute_features",
+    "compute_stateless_features",
 ]

@@ -9,7 +9,6 @@ capacity_sweep.csv exactly at 500/day" -- these tests are what pins that.
 """
 
 import pytest
-
 from common import (
     AVG_FRAUD_AMOUNT,
     SENSITIVITY_RECOVERY_RATE_GRID,

@@ -19,7 +19,6 @@ Skipped (not failed) if either the local DuckDB store or the bundle is
 absent, matching test_golden_file.py's pattern for optional local state.
 """
 
-from pathlib import Path
 
 import duckdb
 import pytest

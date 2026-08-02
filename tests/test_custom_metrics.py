@@ -10,7 +10,10 @@ import numpy as np
 import pytest
 
 from custom_metrics import (
-    weighted_bce_loss, suggest_pos_weight, precision_at_k, recall_at_k,
+    precision_at_k,
+    recall_at_k,
+    suggest_pos_weight,
+    weighted_bce_loss,
 )
 
 

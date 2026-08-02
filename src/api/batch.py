@@ -25,7 +25,7 @@ claim about arrival order, and this accumulator does not second-guess it
 (e.g. by re-sorting on `step`).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from inference.state import DestState
 

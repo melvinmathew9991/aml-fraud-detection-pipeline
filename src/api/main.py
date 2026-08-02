@@ -27,19 +27,27 @@ from fastapi.responses import JSONResponse
 
 from features import FEATURE_COLUMNS
 from inference import rules
-from model_card import MODEL_LIMITATIONS
 from inference.bundle import Bundle, BundleError, load_bundle
-from inference.features import compute_dest_features, compute_features, compute_stateless_features
+from inference.features import (
+    compute_dest_features,
+    compute_features,
+    compute_stateless_features,
+)
 from inference.score import score_batch as score_batch_vectors
 from inference.score import score_one
 from inference.state import DestState, load_dest_state
+from model_card import MODEL_LIMITATIONS
 
 from .audit import log_prediction
 from .batch import BatchAccumulator
 from .errors import register_exception_handlers
 from .limits import BodySizeLimitMiddleware
 from .metrics import MetricsTracker
-from .rate_limit import DEFAULT_MAX_REQUESTS, DEFAULT_WINDOW_SECONDS, RateLimitMiddleware
+from .rate_limit import (
+    DEFAULT_MAX_REQUESTS,
+    DEFAULT_WINDOW_SECONDS,
+    RateLimitMiddleware,
+)
 from .schemas import (
     BatchRequest,
     BatchResponse,
@@ -218,7 +226,8 @@ async def score_batch(payload: BatchRequest, request: Request) -> BatchResponse:
 
     results = []
     n_blocked = n_flagged = n_passed = 0
-    for i, (values, state_hit, result) in enumerate(zip(feature_rows, state_hits, score_results)):
+    for i, (values, state_hit, result) in enumerate(
+            zip(feature_rows, state_hits, score_results, strict=True)):
         decision = rules.decide(values, flagged=result.flagged)
         if decision.decision == "BLOCK":
             n_blocked += 1

@@ -82,7 +82,10 @@ def score_batch(bundle: Bundle, feature_matrix: list[list[float]],
     scaled = bundle.scaler.transform(X)
 
     probabilities = bundle.booster.predict(scaled)
-    contribs = bundle.booster.predict(scaled, pred_contrib=True)
+    # lightgbm's type stubs declare predict() -> list, not ndarray, so mypy
+    # rejects the 2D slice below without this -- predict() actually returns
+    # an ndarray for 2D input at runtime (asarray is a zero-copy no-op then).
+    contribs = np.asarray(bundle.booster.predict(scaled, pred_contrib=True))
     feature_contribs = contribs[:, :-1]
 
     results = []

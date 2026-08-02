@@ -1,0 +1,5 @@
+# Lint/type-check tooling only, for local dev and the CI PR gate -- never
+# installed into the training or serving environments. Rule config lives in
+# pyproject.toml ([tool.ruff], [tool.mypy]), not here.
+ruff==0.16.1
+mypy==2.3.0

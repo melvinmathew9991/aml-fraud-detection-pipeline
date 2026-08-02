@@ -9,7 +9,6 @@ src/model_card.py's shared facts, no API call.
 
 import plotly.express as px
 import streamlit as st
-
 from common import (
     CURRENT_BUNDLE_SNAPSHOT_STEP,
     FEATURE_COLUMNS,

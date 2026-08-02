@@ -16,8 +16,12 @@ interpolation between sweep points could not guarantee.
 
 import plotly.graph_objects as go
 import streamlit as st
-
-from common import AVG_FRAUD_AMOUNT, SENSITIVITY_RECOVERY_RATE_GRID, capacity_sweep_rows, compute_net_value_curve
+from common import (
+    AVG_FRAUD_AMOUNT,
+    SENSITIVITY_RECOVERY_RATE_GRID,
+    capacity_sweep_rows,
+    compute_net_value_curve,
+)
 
 st.set_page_config(page_title="Capacity & economics explorer", page_icon="🔍", layout="wide")
 st.title("Capacity & economics explorer")

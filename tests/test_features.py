@@ -19,8 +19,7 @@ import duckdb
 import pandas as pd
 import pytest
 
-from features import feature_query, FEATURE_COLUMNS
-
+from features import FEATURE_COLUMNS, feature_query
 
 # Six hand-built rows, row_id assigned by insertion order (mirrors what
 # _ensure_transactions_table's row_number() OVER () does on the real CSV).
