@@ -122,7 +122,8 @@ def git_commit_hash() -> str:
             cwd=PROJECT_ROOT, stderr=subprocess.DEVNULL,
         ).strip())
         return f"{commit}-dirty" if dirty else commit
-    except Exception:
+    except Exception as exc:
+        logger.debug("git_commit_hash: falling back to 'nogit' (%s)", exc)
         return "nogit"
 
 
@@ -424,6 +425,13 @@ def tune_model(name, objective_fn, fold_data, n_trials, random_state):
 # as a multiple of the test set's true fraud count, and always paired with
 # recall@K, which is the number that actually reflects ranking quality.
 K_FRAUD_MULTIPLIERS = [1, 2, 5, 10]
+# The single headline K logged per model below is one point on the same
+# curve K_FRAUD_MULTIPLIERS sweeps -- pulled from that list rather than
+# hardcoded a second time, so the two can't silently drift apart (e.g. a
+# future edit to K_FRAUD_MULTIPLIERS that drops 5 would otherwise leave the
+# headline log line describing a K that no longer appears in the curve/CSV).
+HEADLINE_K_MULTIPLIER = 5
+assert HEADLINE_K_MULTIPLIER in K_FRAUD_MULTIPLIERS
 
 
 def evaluate_model(name, y_test, y_proba, pos_weight, k_capacity):
@@ -432,7 +440,7 @@ def evaluate_model(name, y_test, y_proba, pos_weight, k_capacity):
     w_bce = weighted_bce_loss(y_test, y_proba, pos_weight=pos_weight)
 
     n_test_fraud = int(y_test.sum())
-    k = max(n_test_fraud * 5, 10)  # e.g. "review top-K flagged cases per day"
+    k = max(n_test_fraud * HEADLINE_K_MULTIPLIER, 10)  # e.g. "review top-K flagged cases per day"
     k = min(k, len(y_test))
     p_at_k = precision_at_k(y_test, y_proba, k=k)
     r_at_k = recall_at_k(y_test, y_proba, k=k)
@@ -955,10 +963,11 @@ def main():
             "expected_recall_at_threshold": final_op["recall"],
             "expected_alert_rate": final_op["alert_rate"],
         })
-        for artifact in ("model_comparison.csv", "precision_recall_at_k.csv",
+        for artifact in ("model_comparison.csv", "model_comparison_by_fold.csv",
+                         "precision_recall_at_k.csv", "precision_recall_at_k_by_fold.csv",
                          "shap_global_importance.csv", "shap_alert_reasons.csv",
-                         "error_analysis_profile.csv", "feature_ablation.csv",
-                         "capacity_sweep.csv", "capacity_economics.csv"):
+                         "error_analysis_profile.csv", "missed_fraud_summary.csv",
+                         "feature_ablation.csv", "capacity_sweep.csv", "capacity_economics.csv"):
             path = PROCESSED_DIR / artifact
             if path.exists():
                 mlflow.log_artifact(str(path))

@@ -849,6 +849,56 @@ story.
         `httpx` install `starlette` doesn't require at runtime -- confirmed
         that dependency is test-only and does not appear in
         `requirements-serve.txt`.
+- [x] End-to-end audit of Sprints 0-4 (2026-08-02, not itself a sprint,
+      user-requested). Two parallel independent reviewers full-read every
+      `src/` module not already scrutinized while building Sprint 4
+      (`train_pipeline.py` in full, plus `custom_metrics.py`,
+      `error_analysis.py`, `explain.py`, `generate_sample_data.py`,
+      `generate_golden_file.py`, `cv.py`), cross-checked against every
+      specific numeric/behavioral claim in README.md, and verified each
+      claim against actual generated CSVs where possible (e.g.
+      `error_analysis_profile.csv`'s `orig_balance_delta` gap reproduced
+      README's quoted "-7.57 sd... 11,839 vs 1,555,748" to the reported
+      precision). Repo-wide checks: no secrets in tracked files, no bare
+      `except:`, no debug `print()` outside `__main__` blocks, no TODO/FIXME
+      markers, `.gitignore` sound.
+      * **Zero functional bugs found in Sprints 0-2's code.** Every specific
+        claim checked -- `random_state` reaching all three
+        `LogisticRegression` calls, `scale_pos_weight` using the
+        post-undersampling ratio, Optuna's objective averaging all 3 folds,
+        `best_model` selection logic, `metadata.json`'s contents,
+        train-only undersampling, DuckDB memory limits from config,
+        `git_commit_hash()`'s dirty-flag detection, `economics.py`/SHAP/
+        error-analysis outputs actually reaching the CSVs README lists --
+        all confirmed true against the actual code, not just the docs.
+      * **One real coverage gap closed**: `error_analysis.py` and
+        `explain.py` were the only two non-trivial `src/` modules with zero
+        dedicated tests, despite both containing exactly the kind of
+        tie-sensitive/shape-sensitive arithmetic this project's own culture
+        insists on pinning (`missed_fraud_ranking`'s `n_flagged`-not-`k` cutoff,
+        `segment_profile`'s std-gap formula, `_binary_shap_values`'
+        3-D-vs-2-D shape branch, `explain_queue`'s un-scaling). Added
+        `tests/test_error_analysis.py` and `tests/test_explain.py`, 19 new
+        hand-computed tests, all passing on the first run.
+      * **Three small drift-risk fixes** in `train_pipeline.py`: the
+        headline Precision@K's hardcoded `5` was a second, undeclared copy
+        of a value already in `K_FRAUD_MULTIPLIERS` (extracted to
+        `HEADLINE_K_MULTIPLIER`, asserted to stay a member of that list);
+        `git_commit_hash()`'s except clause swallowed its exception with no
+        log line (added `logger.debug`); three generated CSVs
+        (`model_comparison_by_fold.csv`, `precision_recall_at_k_by_fold.csv`,
+        `missed_fraud_summary.csv`) were written to disk but never reached
+        the MLflow artifact log despite every other output doing so (added
+        to the loop). Also one int/float consistency nit in
+        `generate_sample_data.py` (`max(0, ...)` -> `max(0.0, ...)`).
+      * **README.md and ARCHITECTURE.md updated** for Sprint 4 completion --
+        both still described Sprint 4 as upcoming (project structure tree
+        missing `src/inference/`/`src/api/`, ARCHITECTURE §12 still listing
+        feature-construction parity as the project's "highest remaining
+        risk" after it had already been closed with a measured 1.1e-16
+        diff). Neither doc had been touched by the Sprint 4 work itself --
+        only ROADMAP.md had.
+      * Test suite grew from 147 to **166, all passing**.
 - [ ] Sprint 5 -- Streamlit dashboard
 - [ ] Sprint 6 -- containerization & CI
 - [ ] Sprint 7 -- cloud deployment

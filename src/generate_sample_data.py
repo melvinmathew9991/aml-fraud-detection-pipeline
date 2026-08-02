@@ -48,7 +48,7 @@ def make_row(step):
 
     amount = round(random.lognormvariate(6, 2), 2)  # skewed, realistic-ish
     old_orig = round(random.uniform(0, 50000), 2)
-    new_orig = max(0, round(old_orig - amount, 2)) if txn_type in ("CASH_OUT", "PAYMENT", "TRANSFER", "DEBIT") else old_orig
+    new_orig = max(0.0, round(old_orig - amount, 2)) if txn_type in ("CASH_OUT", "PAYMENT", "TRANSFER", "DEBIT") else old_orig
     old_dest = round(random.uniform(0, 50000), 2)
     new_dest = round(old_dest + amount, 2) if txn_type in ("CASH_OUT", "TRANSFER", "CASH_IN") else old_dest
 

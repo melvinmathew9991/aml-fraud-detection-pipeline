@@ -478,9 +478,10 @@ fraud-detection-project/
 │       ├── limits.py             # request body size cap
 │       ├── metrics.py            # in-memory counters backing /metrics
 │       └── audit.py              # structured JSON prediction audit log
-├── tests/                      # pytest suite, 147 tests: features/metrics/threshold/cv/schema/
-│                                #   economics/bundle/golden-file/train-determinism (Sprints 0-3),
-│                                #   inference unit + skew (plumbing & state) + API contract (Sprint 4)
+├── tests/                      # pytest suite, 166 tests: features/metrics/threshold/cv/schema/
+│                                #   economics/bundle/golden-file/train-determinism/error-analysis/
+│                                #   explain (Sprints 0-3), inference unit + skew (plumbing & state)
+│                                #   + API contract (Sprint 4)
 ├── model_bundle/v1/             # committed, versioned serving artifact (see ARCHITECTURE.md §3)
 ├── config.yaml                 # paths, CV, model, Optuna, and MLflow config
 ├── requirements-train.txt       # laptop / CI training environment (also runs the API's tests)
@@ -612,7 +613,13 @@ not just an import check) in a `requirements-serve.txt`-only venv, with
 measured p95 = 4.9ms locally against a 100ms target. Two real
 bundle-integrity bugs were also found and fixed in the process (a Windows
 line-ending checkout issue plus a stale checksum, both in
-`model_bundle/v1/`) — see `ARCHITECTURE.md` §12 for detail. The `pytest`
-suite grew from 66 to 147 tests. Next up is the Streamlit dashboard
-(Sprint 5), followed by CI/CD, cloud deployment, drift monitoring, and
-portfolio polish.
+`model_bundle/v1/`) — see `ARCHITECTURE.md` §12 for detail. A follow-up
+audit of Sprints 0-4 together (still 2026-08-02) found no functional bugs
+in the untouched Sprint 0-2 modules, closed the one real gap it did find
+(`error_analysis.py`/`explain.py` were the only two non-trivial `src/`
+modules without dedicated tests), and fixed a few small drift risks
+(a hardcoded value duplicated instead of shared with its own constant, a
+swallowed exception with no log line, three CSVs generated but never
+logged to MLflow). The `pytest` suite now stands at 166 tests, all
+passing. Next up is the Streamlit dashboard (Sprint 5), followed by CI/CD,
+cloud deployment, drift monitoring, and portfolio polish.
