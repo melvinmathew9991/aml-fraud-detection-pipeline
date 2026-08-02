@@ -462,12 +462,30 @@ fraud-detection-project/
 │   ├── economics.py             # capacity-constraint cost + fraud-ticket-size crossover
 │   ├── export_bundle.py         # emits the versioned model_bundle/ serving artifact
 │   ├── build_dest_state.py      # emits dest_state.parquet, the serving-time feature snapshot
-│   └── train_pipeline.py       # main training + CV + Optuna tuning + MLflow pipeline
-├── tests/                      # pytest suite: features, metrics, threshold, cv, schema
+│   ├── train_pipeline.py       # main training + CV + Optuna tuning + MLflow pipeline
+│   ├── inference/               # Sprint 4: the only code path from raw txn to score
+│   │   ├── bundle.py             # load + sha256-verify a model_bundle/vN/
+│   │   ├── state.py              # destination-state lookup (hashed searchsorted)
+│   │   ├── features.py           # raw transaction dict -> 18-feature vector
+│   │   ├── score.py              # vector -> probability + live TreeSHAP reason codes
+│   │   └── rules.py              # hard-block rule layer, evaluated before the model
+│   └── api/                     # Sprint 4: FastAPI service wrapping src/inference/
+│       ├── main.py               # routes + create_app() factory
+│       ├── schemas.py            # Pydantic v2 request/response models
+│       ├── batch.py              # within-batch destination-state accumulation
+│       ├── errors.py             # RFC 7807 problem+json handlers
+│       ├── rate_limit.py         # per-IP rate limiting
+│       ├── limits.py             # request body size cap
+│       ├── metrics.py            # in-memory counters backing /metrics
+│       └── audit.py              # structured JSON prediction audit log
+├── tests/                      # pytest suite, 147 tests: features/metrics/threshold/cv/schema/
+│                                #   economics/bundle/golden-file/train-determinism (Sprints 0-3),
+│                                #   inference unit + skew (plumbing & state) + API contract (Sprint 4)
 ├── model_bundle/v1/             # committed, versioned serving artifact (see ARCHITECTURE.md §3)
 ├── config.yaml                 # paths, CV, model, Optuna, and MLflow config
-├── requirements-train.txt       # laptop / CI training environment
-├── requirements-serve.txt       # serving image only (Sprint 4) -- no sklearn/shap/duckdb/mlflow
+├── requirements-train.txt       # laptop / CI training environment (also runs the API's tests)
+├── requirements-serve.txt       # serving image only -- no sklearn/shap/duckdb/mlflow/pandas;
+│                                #   verified against a real uvicorn process in an isolated venv
 ├── dashboard/requirements.txt   # Streamlit Community Cloud (Sprint 5)
 ├── ROADMAP.md                  # production-readiness plan, sprint by sprint
 └── README.md
@@ -579,6 +597,22 @@ removal, and the versioned `model_bundle/v1/` serving artifact (native
 LightGBM text format + a pure-numpy scaler + the per-destination state
 snapshot — no scikit-learn/duckdb/mlflow in the serving path, verified by
 reproducing the golden file in a venv containing only
-`requirements-serve.txt`). Next up is Sprint 4 — the shared `src/inference/`
-core and a FastAPI service wrapping the bundle — followed by the Streamlit
-dashboard, CI/CD, cloud deployment, drift monitoring, and portfolio polish.
+`requirements-serve.txt`).
+
+**Sprint 4 is also done**: `src/inference/` (the single code path from raw
+transaction to score — bundle loading, destination-state lookup, feature
+construction, scoring, and an illustrative hard-block rule layer) and a
+FastAPI service (`/health`, `/ready`, `/model-info`, `/score`,
+`/score/batch`, `/metrics`) wrapping it. Both training/serving skew tests
+pass — feature-construction and model/scaler plumbing each verified against
+independent ground truth to floating-point precision — and the full API was
+verified end to end (a real `uvicorn` process handling real HTTP requests,
+not just an import check) in a `requirements-serve.txt`-only venv, with
+`pandas`/`scikit-learn`/`duckdb`/`shap`/`mlflow`/`optuna` absent. `/score`
+measured p95 = 4.9ms locally against a 100ms target. Two real
+bundle-integrity bugs were also found and fixed in the process (a Windows
+line-ending checkout issue plus a stale checksum, both in
+`model_bundle/v1/`) — see `ARCHITECTURE.md` §12 for detail. The `pytest`
+suite grew from 66 to 147 tests. Next up is the Streamlit dashboard
+(Sprint 5), followed by CI/CD, cloud deployment, drift monitoring, and
+portfolio polish.

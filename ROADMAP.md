@@ -4,7 +4,7 @@ This document tracks what's needed to take this project from a working
 scaffold (proven correct on the real 6.36M-row PaySim dataset) to a
 production-shaped, end-to-end system suitable for a portfolio deep-dive.
 
-## 1. Current state (as of 2026-08-01, end of Sprint 3)
+## 1. Current state (as of 2026-08-02, end of Sprint 4)
 
 | Area | State | Closed by |
 |---|---|---|
@@ -25,11 +25,11 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | **Business decision layer** | `src/economics.py` — net value, capacity-constraint cost, ticket-size crossover; naive optimum tested and found degenerate | Sprint 3 |
 | **Serving artifact** | Versioned `model_bundle/v1/` (~9.2MB): LightGBM native format + pure-numpy scaler + `dest_state.parquet` — verified to reproduce the golden file in a `requirements-serve.txt`-only venv | Sprint 3 |
 | Feature set | 18 features (two zero-SHAP features removed, `FEATURE_VERSION` 3) | Sprint 3 |
-| **Serving** | **None — no API yet; the bundle exists but nothing serves it** | Sprint 4 |
+| **Serving** | `src/inference/` core (bundle/state/features/score/rules) + FastAPI service (`/health`, `/ready`, `/model-info`, `/score`, `/score/batch`, `/metrics`); both skew tests pass; verified end-to-end (real `uvicorn` process, real HTTP requests) in a `requirements-serve.txt`-only venv | Sprint 4 |
 | **CI/CD** | **Nothing automated** | Sprint 6 |
 | **Deployment** | **Nothing deployed** | Sprint 7 |
 | **Monitoring** | **No drift detection** | Sprint 8 |
-| **Governance** | Model card + prediction audit log absent | Sprints 4, 9 |
+| **Governance** | Prediction audit log live (structured JSON, feature-hashed); model card still absent | Sprint 4 done / Sprint 9 |
 | **Database** | **None — no persistent store anywhere** | Sprint 10 |
 | **Auth/security** | **None — endpoint would be fully open** | Sprint 10 |
 | **Graph analytics** | Origin-side proven impossible; destination-side unbuilt | Sprint 11 |
@@ -50,14 +50,17 @@ contradicted by its own CSV, and a tie-handling inconsistency between `k` and
 | Design | `ARCHITECTURE.md`: topology, skew resolution, bundle format, API surface, cost controls | — | Done |
 | Design | Rendered architecture diagram, model card | 9 | Planned |
 | Development | Config-driven modular pipeline, DuckDB data layer | 0-2 | Done |
-| Development | `src/inference/` shared core, FastAPI service, Streamlit dashboard | 4-5 | Planned |
+| Development | `src/inference/` shared core, FastAPI service | 4 | Done |
+| Development | Streamlit dashboard | 5 | Planned |
 | Testing | Unit (features/metrics/threshold/cv), pandera ingest schema, golden file | 3 | Done |
-| Testing | Training/serving skew tests (plumbing + state), contract, integration | 4, 6 | Planned |
+| Testing | Training/serving skew tests (plumbing + state), contract | 4 | Done |
+| Testing | Container integration test | 6 | Planned |
 | Build/Release | Model bundle with checksums | 3 | Done |
 | Build/Release | Multi-stage Docker image | 6 | Planned |
 | CI/CD | Actions: lint -> type -> test -> smoke-train -> build -> scan -> deploy | 6-7 | Planned |
 | Deployment | Cloud Run (API) + Streamlit Community Cloud (UI), keyless auth, rollback | 7 | Planned |
-| Operations | Cost controls, budget alert, rate limiting, structured audit log | 4, 7 | Planned |
+| Operations | Cost controls (rate limiting), structured audit log | 4 | Done |
+| Operations | Budget alert | 7 | Planned |
 | Monitoring | PSI drift on features + scores, scheduled job, dashboard page | 8 | Planned |
 | Maintenance | Retraining trigger criteria, champion/challenger promotion path | 8 | Planned |
 | Data/Persistence | Neon Postgres: prediction audit store + analyst feedback | 10 | Planned |
@@ -781,7 +784,71 @@ story.
       * Split dependencies into `requirements-train.txt` /
         `requirements-serve.txt` / `dashboard/requirements.txt`, per
         ARCHITECTURE §3's isolation requirement.
-- [ ] Sprint 4 -- inference core & FastAPI
+- [x] Sprint 4 -- inference core & FastAPI. Not yet merged (branch work,
+      2026-08-02). Outcomes, including the negative/uncertain ones:
+      * **A real, pre-existing bundle-integrity bug found and fixed.**
+        `model_bundle/v1/model.txt`'s sha256 in `bundle_meta.json` matched
+        neither the file on disk NOR the git-committed blob -- two separate
+        defects layered on top of each other. (1) `core.autocrlf=true` with
+        no `.gitattributes` was silently rewriting the LightGBM native-text
+        model file's LF line endings to CRLF on every Windows checkout,
+        which broke LightGBM's parser outright (`Model format error`) and
+        changed its checksum. (2) Independently, the checksum actually
+        recorded in `bundle_meta.json` at Sprint 3's commit didn't match
+        even the correct (git blob) content -- the manifest was stale
+        before the CRLF issue ever entered the picture. Fixed both: added
+        `.gitattributes` (`model_bundle/** -text`, disabling EOL conversion
+        unconditionally) and regenerated the correct sha256 into
+        `bundle_meta.json`. Root-caused by treating `load_bundle()`'s
+        checksum failure as a real signal rather than working around it --
+        the whole point of ARCHITECTURE §3's integrity check is to catch
+        exactly this class of defect, and it did.
+      * **`src/inference/`** (ARCHITECTURE §4): `bundle.py` (load +
+        sha256-verify), `state.py` (dest-state snapshot as five parallel
+        numpy arrays keyed by a sorted 64-bit blake2b hash, `np.searchsorted`
+        lookup, measured **13.09MB resident** for 571,961 destinations
+        against a 13.7MB budget), `features.py` (raw transaction dict ->
+        18-feature vector, split into stateless/dest halves so
+        `/score/batch` can inject merged snapshot+in-batch state), `score.py`
+        (probability + live TreeSHAP reason codes via
+        `booster.predict(pred_contrib=True)`), and `rules.py` (a hard-block
+        layer -- one illustrative rule, full-balance-sweep on
+        TRANSFER/CASH_OUT above 1,000,000, measured 0.247% block rate /
+        10.1% precision against the real table; documented as illustrative,
+        not tuned, since the model score stays the primary signal).
+      * **Both skew tests pass.** Plumbing (`test_skew_plumbing.py`):
+        `inference/score.py` against the golden file's training-computed
+        `expected_score`, max abs diff **1.1e-16**. State
+        (`test_skew_state.py`): `inference/state.py`'s lookups against an
+        independently-written DuckDB query over the live table, for a
+        sampled 30 real destinations plus a merchant sample (all correctly
+        cold-start).
+      * **FastAPI service** (ARCHITECTURE §5): `/health`, `/ready`
+        (fails correctly on a corrupted or missing bundle -- verified),
+        `/model-info`, `/score`, `/score/batch`, `/metrics`. Pydantic v2,
+        `extra="forbid"`, RFC 7807 problem+json errors, per-IP rate limiting,
+        a Content-Length-based 10MB body cap ahead of the 10k-row Pydantic
+        cap, and a structured JSON prediction audit log (feature values
+        hashed, not logged). `/score/batch` accumulates destination
+        aggregates within the batch, verified directly: the first of three
+        transactions to a new destination in one batch reports
+        `state_hit=false`, the next two `true`.
+      * **120 new tests** (42 inference unit + skew, 39 API contract/
+        integration, on top of Sprint 3's 66 -- **147 total, all passing**)
+        via a `create_app()` factory (not a shared module-level singleton)
+        so rate-limit/metrics state can't leak between tests.
+      * **Measured, not assumed: `/score` p95 = 4.9ms locally** (300
+        requests after warmup) against the 100ms DoD ceiling -- LightGBM
+        inference and the numpy state lookup are not the bottleneck at this
+        scale.
+      * **Verified end-to-end in a `requirements-serve.txt`-only venv**: a
+        real `uvicorn` process (not just an import check) answering real
+        HTTP requests to `/health`, `/ready`, and `/score`, with `pandas`,
+        `scikit-learn`, `duckdb`, `shap`, `mlflow`, and `optuna` absent from
+        the environment. `TestClient`-based tests needed an additional
+        `httpx` install `starlette` doesn't require at runtime -- confirmed
+        that dependency is test-only and does not appear in
+        `requirements-serve.txt`.
 - [ ] Sprint 5 -- Streamlit dashboard
 - [ ] Sprint 6 -- containerization & CI
 - [ ] Sprint 7 -- cloud deployment

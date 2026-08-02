@@ -24,3 +24,15 @@ slicer==0.0.8
 pandera==0.32.1
 pyarrow==24.0.0
 pytest==9.1.1
+
+# Sprint 4 additions. fastapi/pydantic/uvicorn are pinned identically to
+# requirements-serve.txt (ARCHITECTURE.md §3's "versions pinned identically
+# across files where they overlap") so the API under test here is the same
+# one the serving image runs. httpx2 is train/test-only -- this version of
+# starlette.testclient.TestClient requires it, but the serving image never
+# imports it (confirmed against a requirements-serve.txt-only venv running
+# a real uvicorn process, not just TestClient).
+fastapi==0.141.1
+pydantic==2.13.4
+uvicorn==0.52.0
+httpx2==2.9.1

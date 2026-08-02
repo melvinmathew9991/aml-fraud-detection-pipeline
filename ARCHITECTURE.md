@@ -605,11 +605,31 @@ Consequence: the serving image needs none of `scikit-learn`, `shap`, `numba`,
 `llvmlite`, `duckdb`, `mlflow`, `optuna`, or `pandas`. The Sprint 3 DoD asserts
 this by building a throwaway venv from `requirements-serve.txt` alone.
 
-The claims **not** yet validated, and where they get tested:
+Sprint 4 closed the highest remaining risk from this list: feature-construction
+parity between `inference/features.py` and the DuckDB `feature_query()`, plus
+the plumbing from bundle to score. Both skew tests pass (§7) —
+`test_skew_plumbing.py` reproduces the golden file's training-computed scores
+to **max abs diff 1.1e-16** through `inference/score.py`, and
+`test_skew_state.py` matches `inference/state.py`'s lookups against an
+independent DuckDB query for a sampled 30 real destinations plus a merchant
+sample. The `/score` FastAPI endpoint measured **p95 = 4.9ms** locally
+(300 requests, target was <100ms), and the full API was verified end-to-end
+(a real `uvicorn` process, real HTTP requests) in a `requirements-serve.txt`-
+only venv.
 
-- Feature-construction parity between `inference/features.py` and the DuckDB
-  `feature_query()` — Sprint 4 skew tests. This is the highest remaining risk in
-  the project.
+Two real bundle-integrity defects were found and fixed while validating this:
+`model_bundle/v1/model.txt`'s recorded sha256 matched neither the file on
+disk nor the git-committed blob (Windows `core.autocrlf` corrupting the
+LightGBM native-text file on checkout, stacked on a stale checksum from
+Sprint 3), and `scaler.json`/`threshold.json` had the same latent issue,
+masked only because their CRLF round-trip happened to be lossless on this
+machine. Fixed with `.gitattributes` (`model_bundle/** -text`) and a
+`newline="\n"` fix in `export_bundle.py`'s JSON writers, plus corrected
+checksums. `load_bundle()`'s integrity check is what caught both — exactly
+the failure mode it exists to catch.
+
+The claims still **not** yet validated, and where they get tested:
+
 - Cloud Run cold-start latency with this image — measured in Sprint 7 and
   recorded in the README rather than predicted here.
 - PSI thresholds (0.25 feature / 0.10 score) are conventional defaults and will
