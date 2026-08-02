@@ -937,7 +937,62 @@ story.
         DoD's 1GB budget. No page loads the full dataset (only
         `data/processed/*.csv` and the bundled 50k sample), but this wasn't
         profiled directly.
-- [ ] Sprint 6 -- containerization & CI
+- [x] Sprint 6 -- containerization & CI. CI green on the PR from
+      `sprint-6-containerization-ci`; not yet merged to `main`
+      (2026-08-02). Outcomes:
+      * **First CI in the project's history**: `.github/workflows/ci.yml`,
+        three jobs -- `lint-test` (ruff -> mypy(src/inference) -> pytest ->
+        smoke-train on `generate_sample_data.py` output), `serving-isolation`
+        (installs ONLY `requirements-serve.txt` + pytest, runs the three
+        inference test files with no pandas/duckdb test-fixture dependency,
+        then boots a real `uvicorn` process and hits `/health`/`/ready`/
+        `/score` over HTTP -- automates the manual verification Sprint 4's
+        audit did by hand), and `container` (`docker build` -> run -> poll
+        `/ready` for cold-start timing -> assert `/score` schema ->
+        `docker rm` -> `trivy` scan on CRITICAL/HIGH, `ignore-unfixed`).
+      * **Multi-stage `Dockerfile`** on `python:3.12-slim`, non-root
+        `appuser`, venv-only copy into the final stage (no build toolchain
+        or pip cache in the shipped image). **Measured in CI: ~185MB
+        uncompressed** (target was <400MB) and **~420ms cold start**
+        (container `run` to first `200` from `/ready`) -- see README
+        "Serving image".
+      * **First-ever local lint/type-check pass, done deliberately rather
+        than trusted to ruff's defaults**: `pyproject.toml` pins an explicit
+        `[tool.ruff.lint] select` (ruff 0.16.1 enables ~920 rules by default
+        -- too broad and too version-fragile to trust silently) and scopes
+        `[tool.mypy]` to `src/inference` per this sprint's own DoD. Fixed
+        along the way: a real mypy false-positive in `inference/score.py`
+        (lightgbm's stubs type `predict()` as `list`, not `ndarray`; fixed
+        with an explicit `np.asarray`, not a `type: ignore`), 3 `zip()`
+        calls given explicit `strict=True`, 2 unused loop variables, a
+        redundant `int()` cast removed after checking the underlying
+        `round()`/`len()` calls already return plain Python `int`, and 3
+        deliberate blind-`except` blocks (a UI error boundary, a best-effort
+        git-hash lookup, a SHAP-failure fallback) kept with a targeted
+        `# noqa: BLE001` and inline reason rather than disabling the rule
+        project-wide. Full 174-test suite re-verified passing after every
+        change.
+      * **`docker-compose.yml`** committed for anyone cloning with Docker,
+        explicitly marked CI-verified-only (no Docker on this dev machine).
+      * **One real incident**: mid-sprint, testing the smoke-train step
+        locally ran `generate_sample_data.py`, which overwrote
+        `data/raw/paysim_transactions.csv` -- the same path the real,
+        gitignored ~493MB PaySim dataset lives at -- with a 50k-row
+        synthetic sample, without checking what was there first. Caught via
+        `reports/train_20260801T130131Z.log`'s fold sizes (~1.25M-row test
+        folds, consistent only with the real dataset). Not recoverable
+        locally (an in-place `open(path, "w")`, not a delete, so no Recycle
+        Bin trail); the file is re-downloadable from Kaggle
+        (kaggle.com/datasets/ealaxi/paysim1). Work paused immediately and
+        was disclosed before continuing. **Root cause for next time**: `ls`
+        or equivalent before running any script documented as writing to a
+        path something else might already occupy -- generate_sample_data.py's
+        own docstring says as much ("Replace this file with the real
+        dataset") and should have been read as a warning, not just a usage
+        note.
+      * CI was authenticated and driven via a portable `gh` CLI zip extract
+        (winget's MSI install hit a UAC prompt this non-interactive shell
+        couldn't answer) and the device-code web auth flow.
 - [ ] Sprint 7 -- cloud deployment
 - [ ] Sprint 8 -- monitoring & drift
 - [ ] Sprint 9 -- portfolio polish **(project is complete and shippable here)**

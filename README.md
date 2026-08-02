@@ -529,6 +529,20 @@ MLflow store (`mlflow.db`) — browse with:
 mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
+### Serving image (Sprint 6)
+
+```
+docker build -t fraud-api .
+docker run -p 8000:8080 fraud-api
+# or: docker compose up
+```
+
+Built and integration-tested exclusively in CI (`.github/workflows/ci.yml`)
+— this dev machine has no Docker (ARCHITECTURE.md §8, GIT_WORKFLOW.md).
+Measured from the CI run, not a local benchmark: **~185MB** uncompressed
+(target was <400MB) and **~420ms** cold start (container `run` to the
+first `200` from `/ready`).
+
 ## Design notes
 
 - **Leakage-safe features**: account-level aggregates (prior transaction
