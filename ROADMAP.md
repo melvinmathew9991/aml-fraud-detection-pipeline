@@ -4,14 +4,14 @@ This document tracks what's needed to take this project from a working
 scaffold (proven correct on the real 6.36M-row PaySim dataset) to a
 production-shaped, end-to-end system suitable for a portfolio deep-dive.
 
-## 1. Current state (as of 2026-08-01, end of Sprint 2)
+## 1. Current state (as of 2026-08-01, end of Sprint 3)
 
 | Area | State | Closed by |
 |---|---|---|
 | Version control | Git repo, branch-per-sprint, PR merges | Sprint 0 |
-| Dependencies | `requirements.txt` pinned; **splits into train/serve in Sprint 3** | Sprint 0 |
+| Dependencies | Split into `requirements-train.txt` / `requirements-serve.txt` / `dashboard/requirements.txt` | Sprint 0, split Sprint 3 |
 | Model artifacts | Persisted per run to `models/<run_id>/` + `metadata.json` | Sprint 0 |
-| Config | `config.yaml` drives paths, CV, models, Optuna, capacity, MLflow | Sprint 0 |
+| Config | `config.yaml` drives paths, CV, models, Optuna, capacity, MLflow, economics | Sprint 0, extended Sprint 3 |
 | Logging | `logging` to console + `reports/train_<run_id>.log` | Sprint 0 |
 | Data layer | DuckDB out-of-core; peak RSS 1,367MB, full run 28.0 min | post-Sprint 0 |
 | Experiment tracking | MLflow local sqlite, every (model, fold) run | Sprint 1 |
@@ -20,8 +20,12 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | Operating point | Capacity-based K + deployable `decision_threshold` | Sprint 2 |
 | Explainability | SHAP global + per-alert reason codes (offline) | Sprint 2 |
 | Error analysis | TP/FP/FN queue profile, missed-fraud ranking | Sprint 2 |
-| **Testing** | **Zero automated tests** | Sprint 3 |
-| **Serving** | **None — a script, not a service** | Sprints 4-5 |
+| **Testing** | `pytest` suite, 66 tests (features/metrics/threshold/cv/schema/economics/bundle/golden-file) | Sprint 3 |
+| **Data validation** | `pandera` schema on raw ingest (dtypes, ranges, nullability, `type` enum) | Sprint 3 |
+| **Business decision layer** | `src/economics.py` — net value, capacity-constraint cost, ticket-size crossover; naive optimum tested and found degenerate | Sprint 3 |
+| **Serving artifact** | Versioned `model_bundle/v1/` (~9.2MB): LightGBM native format + pure-numpy scaler + `dest_state.parquet` — verified to reproduce the golden file in a `requirements-serve.txt`-only venv | Sprint 3 |
+| Feature set | 18 features (two zero-SHAP features removed, `FEATURE_VERSION` 3) | Sprint 3 |
+| **Serving** | **None — no API yet; the bundle exists but nothing serves it** | Sprint 4 |
 | **CI/CD** | **Nothing automated** | Sprint 6 |
 | **Deployment** | **Nothing deployed** | Sprint 7 |
 | **Monitoring** | **No drift detection** | Sprint 8 |
@@ -31,7 +35,6 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | **Graph analytics** | Origin-side proven impossible; destination-side unbuilt | Sprint 11 |
 | **Significance testing** | "Tree models are tied" asserted, never tested | Sprint 11 |
 | **GenAI/LLM** | **Absent entirely** | Sprint 12 |
-| **Business decision layer** | Exchange rate computed, but **no optimum and no cost model** | Sprint 3 |
 
 Three defects found by the Sprint 1 and Sprint 2 audits are already fixed and
 inform the plan below: evidence files cited but untracked, a stale metric claim
@@ -43,14 +46,15 @@ contradicted by its own CSV, and a tie-handling inconsistency between `k` and
 | Phase | Artifact | Sprint | Status |
 |---|---|---|---|
 | Requirements | Problem framing, capacity-based operating point, success metric | 0-2 | Done |
-| Requirements | **Business framing: expected-value optimum, not just an exchange rate** (ARCHITECTURE §0) | 3 | Planned |
+| Requirements | **Business framing: expected-value optimum, not just an exchange rate** (ARCHITECTURE §0) | 3 | Done |
 | Design | `ARCHITECTURE.md`: topology, skew resolution, bundle format, API surface, cost controls | — | Done |
 | Design | Rendered architecture diagram, model card | 9 | Planned |
 | Development | Config-driven modular pipeline, DuckDB data layer | 0-2 | Done |
 | Development | `src/inference/` shared core, FastAPI service, Streamlit dashboard | 4-5 | Planned |
-| Testing | Unit (features/metrics/threshold/cv), pandera ingest schema, golden file | 3 | Planned |
-| Testing | Training/serving skew tests (plumbing + state), contract, integration | 3-4, 6 | Planned |
-| Build/Release | Model bundle with checksums, multi-stage Docker image | 3, 6 | Planned |
+| Testing | Unit (features/metrics/threshold/cv), pandera ingest schema, golden file | 3 | Done |
+| Testing | Training/serving skew tests (plumbing + state), contract, integration | 4, 6 | Planned |
+| Build/Release | Model bundle with checksums | 3 | Done |
+| Build/Release | Multi-stage Docker image | 6 | Planned |
 | CI/CD | Actions: lint -> type -> test -> smoke-train -> build -> scan -> deploy | 6-7 | Planned |
 | Deployment | Cloud Run (API) + Streamlit Community Cloud (UI), keyless auth, rollback | 7 | Planned |
 | Operations | Cost controls, budget alert, rate limiting, structured audit log | 4, 7 | Planned |
@@ -106,8 +110,10 @@ these sprints implement. Sized for **8-10 hrs/week over 8 weeks (~72h)**.
 Ordering rationale, since it differs from the original roadmap:
 
 - **Tests come before serving.** Sprint 4 refactors feature construction into a
-  shared inference module. That refactor is unsafe without the golden-file and
-  skew tests from Sprint 3, so testing moved earlier (was Sprint 4).
+  shared inference module. That refactor is unsafe without the unit and
+  golden-file tests from Sprint 3 already in place -- Sprint 4 adds the
+  skew tests the refactor itself needs, so testing moved earlier overall
+  (was Sprint 4 in the original roadmap).
 - **The model bundle comes before the API.** The API's contract depends on the
   artifact format; deciding it mid-Sprint-4 would mean rework.
 - **Deployment comes before monitoring.** Drift monitoring needs somewhere to
@@ -722,7 +728,59 @@ story.
       `pred_contrib` sums to the raw margin to 8e-14, and the state snapshot
       measures 5.68MB on disk / 13.7MB resident -- both under the planned budget.
       See `ARCHITECTURE.md` §12.
-- [ ] Sprint 3 -- test foundation & model bundle
+- [x] Sprint 3 -- test foundation, economics & model bundle. Merged to `main`
+      via PR #4 on 2026-08-01. Outcomes, including the negative/uncertain ones:
+      * **Removed the two zero-SHAP features** (`orig_prior_txn_count`,
+        `orig_prior_avg_amount`) and retrained. Feature count 20 -> 18,
+        `FEATURE_VERSION` 2 -> 3. Every published number was re-verified
+        against the retrained CSVs rather than left stale.
+      * **`src/economics.py`** (ARCHITECTURE §0): confirmed the naive
+        "find the optimum" framing is genuinely degenerate against this
+        project's own data -- break-even review cost 84,942-161,795 across
+        recovery_rate 0.05-1.00, so full recall wins under every plausible
+        assumption. Reports two non-degenerate questions instead: cost of a
+        capacity constraint (208 frauds, ~327,068,118 exposure, ~1,308,272
+        per marginal review-seat) and the fraud-ticket-size crossover
+        (recommended staffing changes at avg_fraud_amount ~500 and ~5,000 --
+        PaySim's own 1,572,443 average sits nowhere near either).
+      * **66-test `pytest` suite** across `features.py` (leakage safety,
+        div-by-zero guards, the ROWS-vs-RANGE tie/velocity distinction,
+        verified against a hand-built DuckDB fixture), `custom_metrics.py`,
+        `threshold.py` (including a regression test for the `n_flagged > k`
+        tie path, previously exercised only by chance), `cv.py`, the new
+        `pandera` ingest schema, `economics.py`, and the bundle/golden-file
+        pipeline.
+      * **Versioned `model_bundle/v1/`** (~9.2MB, committed via a
+        `.gitignore` negation): LightGBM native text format, a pure-numpy
+        `StandardScaler` reimplementation, and `dest_state.parquet` (571,961
+        rows, mean 7.36 / max 113 prior transactions -- exact match to the
+        ARCHITECTURE §2 profiling). Verified by reproducing a 200-row golden
+        file to **exact** floating-point equality (0.000e+00) in a
+        throwaway venv containing *only* `requirements-serve.txt` --
+        scikit-learn, duckdb, mlflow, and pandas confirmed absent.
+      * **A real reproducibility bug found and fixed while investigating an
+        anomaly.** `config.yaml` documented that `random_state` was
+        "injected separately... so it stays consistent across all models,"
+        but `train_pipeline.py` never actually passed it to any of the
+        three `LogisticRegression` constructions. Harmless for the plain
+        and Ridge-penalized models (`lbfgs` is deterministic regardless of
+        seed), but Lasso's `solver: saga` is stochastic, so its coefficients
+        were not reproducible run to run. Fixed, with a regression test
+        (`test_train_pipeline_determinism.py`) pinning it.
+      * **A finding flagged rather than papered over.** The linear models'
+        fold-2 PR-AUC came back substantially lower than Sprint 2's
+        published 0.24-0.41 (now 0.085-0.113). Ruled out solver randomness
+        as the cause -- Logistic Regression and Ridge are deterministic and
+        reproduced bit-identically across three separate retrains in this
+        environment -- which leaves the two-feature removal and a possible
+        training-environment difference (different sklearn/scipy build than
+        whatever produced the original numbers) as the remaining candidates,
+        not distinguished here. Recorded in `README.md` rather than quietly
+        overwritten, matching how the Sprint 1/2 audits handled similar
+        surprises.
+      * Split dependencies into `requirements-train.txt` /
+        `requirements-serve.txt` / `dashboard/requirements.txt`, per
+        ARCHITECTURE §3's isolation requirement.
 - [ ] Sprint 4 -- inference core & FastAPI
 - [ ] Sprint 5 -- Streamlit dashboard
 - [ ] Sprint 6 -- containerization & CI
