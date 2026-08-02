@@ -71,7 +71,13 @@ def export_scaler(scaler, feature_names: list[str], out_path: Path) -> None:
         "mean": scaler.mean_.tolist(),
         "scale": scaler.scale_.tolist(),
     }
-    with open(out_path, "w") as f:
+    # newline="\n": Python's default text-mode write translates \n -> \r\n
+    # on Windows, which would make this file's checksum (computed below in
+    # build_bundle, in binary mode) depend on which OS built the bundle.
+    # Forcing LF here means bundle_meta.json's sha256 is stable regardless
+    # of platform, matching model.txt (LightGBM's own writer already emits
+    # LF) and dest_state.parquet (binary, no newline concept).
+    with open(out_path, "w", newline="\n") as f:
         json.dump(payload, f, indent=2)
 
 
@@ -84,7 +90,7 @@ def export_threshold(metadata: dict, out_path: Path) -> None:
         "expected_recall": metadata["expected_recall_at_threshold"],
         "precision_ceiling": metadata["precision_ceiling_at_threshold"],
     }
-    with open(out_path, "w") as f:
+    with open(out_path, "w", newline="\n") as f:
         json.dump(payload, f, indent=2)
 
 
@@ -140,7 +146,7 @@ def build_bundle(run_dir: Path, output_dir: Path, dest_state_path: Path) -> None
         "trained_at": metadata["run_id"],
         "sha256": sha256,
     }
-    with open(meta_path, "w") as f:
+    with open(meta_path, "w", newline="\n") as f:
         json.dump(bundle_meta, f, indent=2)
     logger.info("Wrote bundle_meta.json with sha256 for %d files", len(sha256))
 
