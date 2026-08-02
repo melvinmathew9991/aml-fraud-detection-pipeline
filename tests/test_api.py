@@ -264,6 +264,7 @@ def test_model_info_contract(client):
     assert body["bundle_version"] == "v1"
     assert len(body["feature_names"]) == body["feature_version"]
     assert isinstance(body["limitations"], list) and len(body["limitations"]) > 0
+    assert isinstance(body["dest_state_snapshot_step"], int)
 
 
 # ------------------------------------------------------------- rate limit

@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 
 from features import FEATURE_COLUMNS
 from inference import rules
+from model_card import MODEL_LIMITATIONS
 from inference.bundle import Bundle, BundleError, load_bundle
 from inference.features import compute_dest_features, compute_features, compute_stateless_features
 from inference.score import score_batch as score_batch_vectors
@@ -58,19 +59,6 @@ logger = logging.getLogger("api")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v1"
 REASONS_PER_ALERT = 4
-
-MODEL_INFO_LIMITATIONS = [
-    "The destination-state snapshot is frozen at a single training-time step; "
-    "it is a point-in-time approximation, not an online feature store.",
-    "Scoring the same transaction twice via /score returns the same answer -- "
-    "state does not accumulate. /score/batch accumulates within one batch only.",
-    "Serving state is as-of one instant; training features were as-of each "
-    "row's own timestamp. The two agree only for transactions arriving after "
-    "the snapshot step.",
-    "The hard-block rule layer is illustrative, not tuned: measured precision "
-    "on the training data is low (~10%) at a ~0.25% block rate. The model "
-    "score is the primary signal.",
-]
 
 
 class ServiceState:
@@ -162,7 +150,8 @@ async def model_info(request: Request) -> ModelInfoResponse:
         expected_recall=bundle.threshold.expected_recall,
         precision_ceiling=bundle.threshold.precision_ceiling,
         dest_state_rows=len(service.dest_state.keys),
-        limitations=MODEL_INFO_LIMITATIONS,
+        dest_state_snapshot_step=service.dest_state.snapshot_step,
+        limitations=MODEL_LIMITATIONS,
     )
 
 

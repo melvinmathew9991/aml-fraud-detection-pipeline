@@ -190,8 +190,11 @@ Sizing (measured, not estimated):
   so their prior-history is ~always empty. They are **not stored**; they resolve
   to the cold-start default. This drops 79% of the rows for negligible fidelity
   loss.
-- **Measured artifact: 5.68MB** parquet (zstd), built and sized against the real
-  table on 2026-08-01. Ships inside the image.
+- **Measured artifact: 7.48MB** parquet (zstd), built and sized against the real
+  table. (An earlier draft of this document cited 5.68MB; that figure was never
+  accurate for the artifact actually committed -- corrected 2026-08-02 while
+  verifying the bundle for Sprint 5, re-measured directly against the git blob
+  rather than trusted from the doc.) Ships inside the image.
 
 ### In-memory representation (this matters on 512MiB)
 
@@ -310,7 +313,7 @@ a **release artifact**, versioned deliberately:
 model_bundle/v1/    <- committed, un-ignored
 ```
 
-**Measured total ~7.3MB** (`model.txt` 1.57MB + `dest_state.parquet` 5.68MB +
+**Measured total ~9.2MB** (`model.txt` 1.70MB + `dest_state.parquet` 7.48MB +
 three small JSON files), comfortably under GitHub's limits and small enough that
 the repo stays self-contained: CI, `docker build`, and a fresh clone all work
 with no external fetch and no credentials. If the bundle ever exceeds ~40MB,
@@ -595,7 +598,7 @@ Sprint 4. All four were tested against the real trained artifacts in
 | LightGBM native text round-trip preserves predictions, so `joblib` pickles can leave the serving path | **max abs diff 0.000e+00** (exact); `model.txt` = 1.57MB |
 | `pred_contrib=True` yields exact TreeSHAP without the `shap` package | contributions sum to raw margin, **max abs diff 8.08e-14**; shape (n, 21) = 20 features + base value |
 | `sigmoid(raw_margin)` equals `predict_proba` | **max abs diff 0.000e+00** (exact) |
-| `dest_state` snapshot is small enough to bake into the image | **5.68MB** parquet / **13.7MB** resident, both under the planned budget |
+| `dest_state` snapshot is small enough to bake into the image | **7.48MB** parquet / **13.7MB** resident, both under the planned budget |
 
 Measured against the current 20-feature model in `models/20260728T172950Z/`;
 Sprint 3's 18-feature retrain re-runs the same checks (the contribution matrix

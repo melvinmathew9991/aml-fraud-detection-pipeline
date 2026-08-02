@@ -8,14 +8,30 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
-from inference.state import COLD_START, DestState, DestStateCollisionError, load_dest_state
+from inference.state import (
+    COLD_START,
+    SNAPSHOT_STEP_METADATA_KEY,
+    DestState,
+    DestStateCollisionError,
+    load_dest_state,
+)
 
 
-def _write_parquet(tmp_path: Path, rows: list[dict]) -> Path:
+def _write_parquet(tmp_path: Path, rows: list[dict], snapshot_step: int | None = None) -> Path:
     path = tmp_path / "dest_state.parquet"
-    pd.DataFrame(rows).to_parquet(path, engine="pyarrow", index=False)
+    df = pd.DataFrame(rows)
+    if snapshot_step is None:
+        df.to_parquet(path, engine="pyarrow", index=False)
+    else:
+        table = pa.Table.from_pandas(df, preserve_index=False)
+        table = table.replace_schema_metadata({
+            SNAPSHOT_STEP_METADATA_KEY: str(snapshot_step).encode("utf-8"),
+        })
+        pq.write_table(table, path)
     return path
 
 
@@ -32,6 +48,26 @@ def test_load_and_lookup_known_destination(tmp_path):
     assert hit is True
     assert values == {"prior_txn_count": 5, "prior_avg_amount": 200.0,
                        "txn_count_24h": 2, "amount_sum_24h": 150.0}
+
+
+def test_snapshot_step_round_trips_through_parquet_metadata(tmp_path):
+    path = _write_parquet(tmp_path, [
+        {"name_dest": "C1", "prior_txn_count": 5, "prior_avg_amount": 200.0,
+         "txn_count_24h": 2, "amount_sum_24h": 150.0},
+    ], snapshot_step=743)
+    ds = load_dest_state(path)
+    assert ds.snapshot_step == 743
+
+
+def test_snapshot_step_none_when_metadata_absent(tmp_path):
+    # Older-format parquet with no embedded metadata (pre-Sprint-5) must not
+    # crash the loader -- just report snapshot_step as unknown.
+    path = _write_parquet(tmp_path, [
+        {"name_dest": "C1", "prior_txn_count": 5, "prior_avg_amount": 200.0,
+         "txn_count_24h": 2, "amount_sum_24h": 150.0},
+    ])
+    ds = load_dest_state(path)
+    assert ds.snapshot_step is None
 
 
 def test_lookup_unknown_destination_returns_cold_start(tmp_path):

@@ -88,6 +88,7 @@ class ModelInfoResponse(BaseModel):
     expected_recall: float
     precision_ceiling: float
     dest_state_rows: int
+    dest_state_snapshot_step: int | None
     limitations: list[str]
 
 

@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 
 import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from config import load_config, PROJECT_ROOT
 
@@ -39,6 +41,15 @@ logger = logging.getLogger("build_dest_state")
 
 VELOCITY_WINDOW_HOURS = 24  # matches features.VELOCITY_WINDOW_HOURS
 MAX_BUNDLE_SIZE_MB = 20  # Sprint 3 DoD ceiling
+
+# Embedded as parquet file-level metadata rather than a separate sidecar
+# file, so the snapshot's own artifact is the single source of truth for
+# when it was taken -- ARCHITECTURE.md §5 requires /model-info to report
+# this ("snapshot as-of step"). inference/state.py reads the same key; kept
+# in sync by convention (a hardcoded string in both, not a shared import --
+# state.py cannot depend on this training-only module, which pulls in
+# duckdb).
+SNAPSHOT_STEP_METADATA_KEY = b"snapshot_step"
 
 
 def build_dest_state(con: duckdb.DuckDBPyConnection, table: str = "transactions"):
@@ -96,7 +107,12 @@ def main():
         con.close()
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(args.output, engine="pyarrow", compression="zstd", index=False)
+    table = pa.Table.from_pandas(df, preserve_index=False)
+    table = table.replace_schema_metadata({
+        **(table.schema.metadata or {}),
+        SNAPSHOT_STEP_METADATA_KEY: str(snapshot_step).encode("utf-8"),
+    })
+    pq.write_table(table, args.output, compression="zstd")
 
     size_mb = args.output.stat().st_size / (1024 ** 2)
     logger.info("Wrote %d destination rows (snapshot as of step %d) to %s (%.2f MB)",

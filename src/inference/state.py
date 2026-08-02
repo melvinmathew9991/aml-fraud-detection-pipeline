@@ -119,12 +119,19 @@ class DestState:
         return results, hits
 
 
+SNAPSHOT_STEP_METADATA_KEY = b"snapshot_step"  # written by build_dest_state.py
+
+
 def load_dest_state(parquet_path: Path) -> DestState:
     table = pq.read_table(
         parquet_path,
         columns=["name_dest", "prior_txn_count", "prior_avg_amount",
                  "txn_count_24h", "amount_sum_24h"],
     )
+    file_metadata = table.schema.metadata or {}
+    raw_snapshot_step = file_metadata.get(SNAPSHOT_STEP_METADATA_KEY)
+    snapshot_step = int(raw_snapshot_step) if raw_snapshot_step is not None else None
+
     names = table.column("name_dest").to_pylist()
     count = table.column("prior_txn_count").to_numpy(zero_copy_only=False).astype("int32")
     avg = table.column("prior_avg_amount").to_numpy(zero_copy_only=False).astype("float32")
@@ -151,4 +158,5 @@ def load_dest_state(parquet_path: Path) -> DestState:
         avg=avg[order],
         c24=c24[order],
         s24=s24[order],
+        snapshot_step=snapshot_step,
     )

@@ -105,6 +105,17 @@ def export_model(model, out_path: Path) -> None:
             "format exists to avoid)."
         )
     booster.save_model(str(out_path))
+    # LightGBM's own C++ writer is not consistently LF: on this machine it
+    # wrote CRLF for the file's trailing two lines while the rest stayed LF
+    # (observed 2026-08-02 building this bundle on Windows) -- a platform-
+    # dependent inconsistency in a file whose bytes are checksummed in
+    # bundle_meta.json. Normalize unconditionally rather than trust the
+    # writer, the same reasoning as the newline="\n" fix on the JSON writers
+    # above and the .gitattributes fix for checkout-time corruption.
+    raw = out_path.read_bytes()
+    normalized = raw.replace(b"\r\n", b"\n")
+    if normalized != raw:
+        out_path.write_bytes(normalized)
 
 
 def build_bundle(run_dir: Path, output_dir: Path, dest_state_path: Path) -> None:

@@ -899,7 +899,44 @@ story.
         diff). Neither doc had been touched by the Sprint 4 work itself --
         only ROADMAP.md had.
       * Test suite grew from 147 to **166, all passing**.
-- [ ] Sprint 5 -- Streamlit dashboard
+- [x] Sprint 5 -- Streamlit dashboard. Not yet committed (working tree only,
+      2026-08-02). Outcomes:
+      * **Five pages** (ARCHITECTURE §6): Score a transaction, Batch upload,
+        Capacity & economics explorer, Model card, Drift (explicit
+        placeholder, no fabricated numbers -- ships Sprint 8).
+      * **Snapshot-step tracking added to close a `/model-info` gap**:
+        `build_dest_state.py` now embeds `snapshot_step` in
+        `dest_state.parquet`'s own file metadata rather than a separate
+        sidecar, `inference/state.py` reads it back (`None` for older
+        parquet files, verified), and `/model-info` exposes it as
+        `dest_state_snapshot_step` -- the dashboard's static Model card page
+        mirrors the same fact via a new `src/model_card.py` (also now the
+        single source for `MODEL_LIMITATIONS`, deduplicated out of
+        `api/main.py`). Verified live: `/model-info`'s
+        `dest_state_snapshot_step` (743) matches
+        `model_card.CURRENT_BUNDLE_SNAPSHOT_STEP` exactly.
+      * **Verified end-to-end against a live local API**, not just imports:
+        `/score` and `/score/batch` exercised through the actual running
+        dashboard pages (not just curl), and the landing page confirmed to
+        render cleanly (`200`, no traceback) with the API process killed
+        outright -- the DoD's "landing page renders with the API
+        deliberately stopped" line.
+      * **Capacity explorer reproduces `capacity_sweep.csv` exactly at
+        500/day** -- test-covered (`tests/test_dashboard_common.py`, 6
+        tests), including the sensitivity-band degeneracy check.
+      * Bundled sample confirmed at exactly 50,000 rows.
+      * Also fixed in the same pass: `export_bundle.py` now normalizes CRLF
+        a Windows LightGBM writer introduced into `model.txt` (was breaking
+        its checksum), and `ARCHITECTURE.md`'s `dest_state.parquet` size
+        figures corrected (5.68MB was never accurate; re-measured at 7.48MB
+        against the actual git blob).
+      * **8 new tests** (2 snapshot-step round-trip/back-compat in
+        `test_inference_state.py`, 6 in `test_dashboard_common.py`) --
+        **174 total, all passing.**
+      * Not independently measured: precise RAM ceiling per page against the
+        DoD's 1GB budget. No page loads the full dataset (only
+        `data/processed/*.csv` and the bundled 50k sample), but this wasn't
+        profiled directly.
 - [ ] Sprint 6 -- containerization & CI
 - [ ] Sprint 7 -- cloud deployment
 - [ ] Sprint 8 -- monitoring & drift
