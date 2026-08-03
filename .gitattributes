@@ -1,3 +1,16 @@
+# Normalize to LF in the repository AND in the working tree, on every
+# platform. Development happens on Windows with core.autocrlf=true, but every
+# artifact this repo produces runs on Linux: CI, the python:3.12-slim image,
+# Cloud Run. Without `eol=lf` a Windows checkout hands back CRLF, which
+# contradicts .editorconfig and reintroduces exactly the class of mismatch
+# that corrupted model.txt below.
+#
+# Verified 2026-08-03 before adding: every tracked file already stores LF in
+# the index, so this renormalizes nothing -- it only fixes checkout.
+* text=auto eol=lf
+
+# --- exemption, must stay AFTER the rule above (last match wins) ------------
+#
 # model_bundle/**'s files are checksummed byte-for-byte in bundle_meta.json
 # and verified at bundle-load time (src/inference/bundle.py). Without this,
 # core.autocrlf=true silently rewrites LF -> CRLF on checkout for any file
@@ -8,4 +21,10 @@
 # original LF content, so load_bundle() correctly refused to serve it.
 # Marking everything here `-text` disables EOL conversion unconditionally,
 # on every platform, for every file in the bundle.
-model_bundle/** -text
+#
+# `!eol` is as load-bearing as `-text`: git's docs state that setting `eol`
+# "effectively sets the text attribute", so leaving the global `eol=lf` above
+# to apply here could re-enable the very conversion `-text` disables. `!eol`
+# returns the attribute to unspecified for these paths. Verified below with
+# `git check-attr`, not assumed.
+model_bundle/** -text !eol
