@@ -98,14 +98,27 @@ jobs:
           echo "### Image size: ${SIZE_MB} MB (uncompressed)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: run container, measure cold start, wait for /ready
+        # The loop must record whether it actually saw a 200. Without the
+        # READY flag it exits 0 on timeout, reporting the 30s ceiling as if
+        # it were a cold-start measurement while the container is dead --
+        # which is exactly what happened before this was fixed.
         run: |
           START=$(date +%s%N)
           docker run -d --name fraud-api-test -p 8080:8080 fraud-api:ci
+          READY=0
           for i in $(seq 1 60); do
-            if curl -sf http://localhost:8080/ready >/dev/null; then break; fi
+            if curl -sf http://localhost:8080/ready >/dev/null 2>&1; then READY=1; break; fi
             sleep 0.5
           done
           END=$(date +%s%N)
+          if [ "$READY" -ne 1 ]; then
+            echo "::error::/ready never returned 200 within 30s -- container is not serving"
+            echo "--- docker ps -a ---"
+            docker ps -a
+            echo "--- docker logs fraud-api-test ---"
+            docker logs fraud-api-test 2>&1 | tail -60
+            exit 1
+          fi
           COLD_START_MS=$(( (END - START) / 1000000 ))
           echo "Cold start (container run -> first 200 from /ready): ${COLD_START_MS} ms"
           echo "### Cold start: ${COLD_START_MS} ms" >> "$GITHUB_STEP_SUMMARY"
