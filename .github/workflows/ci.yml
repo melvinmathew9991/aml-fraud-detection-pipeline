@@ -119,12 +119,22 @@ jobs:
           COMPRESSED_MB=$(awk -v b="$COMPRESSED_B" 'BEGIN{printf "%.1f", b/1048576}')
           RATIO=$(awk -v c="$COMPRESSED_MB" -v u="$SIZE_MB" 'BEGIN{printf "%.0f", 100*c/u}')
 
-          # Google's free tier is 0.5GB. Treat that as 512 MiB.
-          FREE_MB=512
+          # Google documents the free tier as "0.5 GB", which is ambiguous:
+          # 0.5 GiB is 512 MiB, 0.5 GB decimal is ~476.8 MiB. The two give
+          # different answers at this image size -- 3 stored versions fit under
+          # the binary reading with 2.6 MiB to spare and breach the decimal one
+          # by 34 MB. Assume the SMALLER bound: a retention policy that only
+          # holds under the favourable interpretation of a billing unit is not
+          # a policy, and the failure mode is a bill rather than a broken build.
+          FREE_MB=476
           FITS=$(awk -v f="$FREE_MB" -v c="$COMPRESSED_MB" 'BEGIN{printf "%d", int(f/c)}')
 
+          # Must match the cleanup policy in ROADMAP.md Sprint 7.
+          PLANNED_VERSIONS=2
+
           echo "Compressed (registry storage estimate): ${COMPRESSED_MB} MB (${RATIO}% of uncompressed)"
-          echo "Versions fitting in the 0.5GB free tier: ${FITS}"
+          echo "Versions fitting in the free tier (conservative 0.5GB decimal): ${FITS}"
+          echo "Cleanup policy retains: ${PLANNED_VERSIONS}"
 
           {
             echo "### Serving image"
@@ -134,11 +144,12 @@ jobs:
             echo "| Uncompressed | ${SIZE_MB} MB |"
             echo "| Compressed (registry estimate) | ${COMPRESSED_MB} MB |"
             echo "| Compression ratio | ${RATIO}% |"
-            echo "| Versions within 0.5GB free tier | **${FITS}** |"
+            echo "| Versions within free tier (conservative) | **${FITS}** |"
+            echo "| Cleanup policy retains | ${PLANNED_VERSIONS} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$FITS" -lt 3 ]; then
-            echo "::warning::Only ${FITS} image version(s) fit in Artifact Registry's 0.5GB free tier. ROADMAP Sprint 7 plans a cleanup policy keeping 3 -- that must be lowered to ${FITS} or the image must shrink."
+          if [ "$FITS" -lt "$PLANNED_VERSIONS" ]; then
+            echo "::warning::Image grew: only ${FITS} version(s) now fit in Artifact Registry's free tier, but the cleanup policy retains ${PLANNED_VERSIONS}. Lower the retention count in ROADMAP Sprint 7 and in the registry policy, or shrink the image."
           fi
 
       - name: run container, measure cold start, wait for /ready

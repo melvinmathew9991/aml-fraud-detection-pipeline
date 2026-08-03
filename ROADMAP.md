@@ -293,8 +293,24 @@ terminal much faster than the web UI.
   it is cheap on this hardware).** Verified absent 2026-08-01. It is needed for
   the initial project/WIF setup, which is materially harder through the web
   console alone. Everything after setup runs from CI.
-- GCP project, Artifact Registry repo, **cleanup policy keeping 3 versions**
-  (0.5GB free tier breaches on the 4th build otherwise).
+- GCP project, Artifact Registry repo, **cleanup policy keeping 2 versions**.
+  Revised 2026-08-03 from "3 versions" against a measured number. That figure
+  assumed a ~185MB image; the real one is **510.6MB uncompressed / 169.8MB
+  compressed** (measured in CI run `30795258811` — Artifact Registry bills on
+  compressed layer storage, so the compressed figure is the one that counts).
+  Google documents the free tier as "0.5 GB", which is ambiguous, and the two
+  readings disagree at this size:
+
+  | Retention | 0.5 GiB (512 MiB) | 0.5 GB decimal (500 MB) |
+  |---|---|---|
+  | 2 versions | fits, +172 MiB | fits, +144 MB |
+  | 3 versions | fits, **+2.6 MiB** | **breaches, -34 MB** |
+
+  So 3 breaches outright under the decimal reading and leaves 0.5% headroom
+  under the binary one — headroom a single dependency bump erases. 2 is safe
+  under both. The container job now measures compressed size on every run and
+  warns if the image grows past what the policy assumes, so this cannot go
+  stale silently the way the 185MB figure did.
 - Workload Identity Federation — no service-account JSON in repo secrets.
 - Deploy Cloud Run `us-central1`: `--min-instances=0 --max-instances=2
   --memory=512Mi --cpu=1 --concurrency=80 --timeout=30s`.
