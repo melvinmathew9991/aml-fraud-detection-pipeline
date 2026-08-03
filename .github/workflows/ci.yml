@@ -1,0 +1,154 @@
+name: CI
+
+# Sprint 6 scope only (ROADMAP.md): PR gate + build/test the image. No
+# Artifact Registry push, no Cloud Run deploy -- that needs GCP credentials
+# wired up in Sprint 7 (ARCHITECTURE.md §8's "main:" pipeline stage).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-test:
+    name: Lint, type-check, test, smoke-train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          # Explicit, or setup-python's default `**/requirements.txt` glob keys
+          # the cache off dashboard/requirements.txt alone -- the only file in
+          # the repo matching that name, and the one this job cares least about.
+          cache-dependency-path: |
+            requirements-train.txt
+            requirements-dev.txt
+            dashboard/requirements.txt
+      # dashboard/requirements.txt is needed for tests/test_dashboard_common.py:
+      # it imports dashboard/common.py, which imports streamlit. Without it
+      # pytest fails at *collection* and the whole suite is skipped.
+      - run: pip install -r requirements-train.txt -r requirements-dev.txt -r dashboard/requirements.txt
+      - name: ruff
+        run: ruff check src/ dashboard/ tests/
+      - name: mypy (src/inference -- scope set in pyproject.toml)
+        run: mypy
+      - name: pytest
+        run: pytest -q
+      - name: smoke-train
+        # Synthetic sample only -- the real 493MB CSV is gitignored and CI
+        # must never need it (ARCHITECTURE.md §8).
+        run: |
+          python src/generate_sample_data.py
+          python src/train_pipeline.py
+
+  serving-isolation:
+    name: Serving dependency isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-serve.txt
+      - name: install ONLY requirements-serve.txt
+        # + pytest as a test runner, which is CI tooling, not a runtime
+        # import risk -- the point of this job is that api/ and inference/
+        # never import anything outside requirements-serve.txt.
+        run: pip install -r requirements-serve.txt pytest==9.1.1
+      - name: inference unit tests
+        # Only the test files with no pandas/duckdb test-fixture dependency
+        # (test_inference_state.py, the skew tests, and test_api.py's
+        # TestClient all need pandas/duckdb/httpx2 -- train/test-only, see
+        # requirements-train.txt -- and already run in lint-test above).
+        run: pytest tests/test_inference_bundle.py tests/test_inference_features.py tests/test_inference_rules.py -v
+      - name: boot a real uvicorn process and hit it over HTTP
+        # Not TestClient -- a real process, real sockets, same as Sprint 4's
+        # manual verification of this venv, now automated.
+        run: |
+          uvicorn api.main:app --app-dir src --host 0.0.0.0 --port 8000 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/ready && break
+            sleep 1
+          done
+          curl -sf http://localhost:8000/health
+          curl -sf http://localhost:8000/ready
+          curl -sf -X POST http://localhost:8000/score -H "Content-Type: application/json" -d '{
+            "step": 743, "type": "TRANSFER", "amount": 250000.0,
+            "nameOrig": "C1231006815", "oldbalanceOrg": 250000.0, "newbalanceOrig": 0.0,
+            "nameDest": "C1979787155", "oldbalanceDest": 0.0, "newbalanceDest": 250000.0
+          }'
+
+  container:
+    name: Build image, integration test, trivy scan
+    runs-on: ubuntu-latest
+    needs: [lint-test, serving-isolation]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build image
+        run: docker build -t fraud-api:ci .
+
+      - name: record image size
+        run: |
+          SIZE_MB=$(docker image inspect fraud-api:ci --format='{{.Size}}' | awk '{printf "%.1f", $1/1024/1024}')
+          echo "Image size: ${SIZE_MB} MB (uncompressed)"
+          echo "### Image size: ${SIZE_MB} MB (uncompressed)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: run container, measure cold start, wait for /ready
+        # The loop must record whether it actually saw a 200. Without the
+        # READY flag it exits 0 on timeout, reporting the 30s ceiling as if
+        # it were a cold-start measurement while the container is dead --
+        # which is exactly what happened before this was fixed.
+        run: |
+          START=$(date +%s%N)
+          docker run -d --name fraud-api-test -p 8080:8080 fraud-api:ci
+          READY=0
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/ready >/dev/null 2>&1; then READY=1; break; fi
+            sleep 0.5
+          done
+          END=$(date +%s%N)
+          if [ "$READY" -ne 1 ]; then
+            echo "::error::/ready never returned 200 within 30s -- container is not serving"
+            echo "--- docker ps -a ---"
+            docker ps -a
+            echo "--- docker logs fraud-api-test ---"
+            docker logs fraud-api-test 2>&1 | tail -60
+            exit 1
+          fi
+          COLD_START_MS=$(( (END - START) / 1000000 ))
+          echo "Cold start (container run -> first 200 from /ready): ${COLD_START_MS} ms"
+          echo "### Cold start: ${COLD_START_MS} ms" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: integration assertions -- /health, /ready, /score schema
+        run: |
+          curl -sf http://localhost:8080/health
+          READY=$(curl -sf http://localhost:8080/ready)
+          echo "$READY" | grep -q '"status":"ready"'
+          RESP=$(curl -sf -w '\nLATENCY_S:%{time_total}' -X POST http://localhost:8080/score \
+            -H "Content-Type: application/json" \
+            -d '{
+              "step": 743, "type": "TRANSFER", "amount": 250000.0,
+              "nameOrig": "C1231006815", "oldbalanceOrg": 250000.0, "newbalanceOrig": 0.0,
+              "nameDest": "C1979787155", "oldbalanceDest": 0.0, "newbalanceDest": 250000.0
+            }')
+          echo "$RESP"
+          echo "$RESP" | head -n1 | grep -q '"decision"'
+
+      - name: stop container
+        if: always()
+        run: docker rm -f fraud-api-test || true
+
+      - name: trivy scan
+        # Tags are v-prefixed; a bare "0.28.0" does not resolve and fails the
+        # job at setup, before docker build ever runs.
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: fraud-api:ci
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"

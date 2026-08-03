@@ -9,8 +9,11 @@ that entirely (ARCHITECTURE.md §4).
 
 import pandas as pd
 import streamlit as st
-
-from common import RAW_TRANSACTION_FIELDS, call_api_with_wake_retry, render_sidebar_api_status
+from common import (
+    RAW_TRANSACTION_FIELDS,
+    call_api_with_wake_retry,
+    render_sidebar_api_status,
+)
 
 st.set_page_config(page_title="Score a transaction", page_icon="🔍", layout="wide")
 st.title("Score a transaction")
@@ -54,7 +57,7 @@ if submitted:
 
     try:
         response = call_api_with_wake_retry("POST", "/score", json=payload)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- degrade to an error message, never crash the page
         st.error(f"Could not reach the scoring API: {exc}")
         st.stop()
 

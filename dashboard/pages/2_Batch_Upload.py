@@ -14,7 +14,6 @@ import io
 import pandas as pd
 import requests
 import streamlit as st
-
 from common import (
     RAW_TRANSACTION_FIELDS,
     call_api_with_wake_retry,

@@ -13,7 +13,6 @@ import pytest
 
 from error_analysis import missed_fraud_ranking, segment_profile
 
-
 # Six rows: TP = {0, 1}, FP = {2}, FN = {4}, TN = {3, 5} (not flagged, not fraud).
 X = pd.DataFrame({
     "amount": [100.0, 200.0, 150.0, 50.0, 300.0, 80.0],

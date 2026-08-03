@@ -10,7 +10,13 @@ import math
 import numpy as np
 import pytest
 
-from threshold import window_days, capacity_k, threshold_at_k, operating_point, capacity_sweep
+from threshold import (
+    capacity_k,
+    capacity_sweep,
+    operating_point,
+    threshold_at_k,
+    window_days,
+)
 
 
 def test_window_days_is_endpoint_inclusive():

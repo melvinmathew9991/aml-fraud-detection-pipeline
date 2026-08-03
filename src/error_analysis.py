@@ -105,8 +105,8 @@ def missed_fraud_ranking(y_true: np.ndarray, y_proba: np.ndarray, k: int) -> dic
     stats = {
         "total_fraud": n_fraud,
         "fraud_in_top_k": int((fraud_ranks <= k).sum()),
-        "fraud_missed": int(len(missed_ranks)),
-        "n_rows": int(len(y_proba)),
+        "fraud_missed": len(missed_ranks),
+        "n_rows": len(y_proba),
         "k": int(k),
     }
     if len(missed_ranks):

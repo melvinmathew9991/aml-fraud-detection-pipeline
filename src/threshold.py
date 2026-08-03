@@ -52,7 +52,7 @@ def capacity_k(step_test: np.ndarray, reviews_per_day: float, n_rows: int) -> in
     K here is a function of staffing and elapsed time only, both of which a
     deployed system knows without seeing a single label.
     """
-    k = int(round(reviews_per_day * window_days(step_test)))
+    k = round(reviews_per_day * window_days(step_test))
     return int(np.clip(k, 1, n_rows))
 
 
@@ -94,7 +94,7 @@ def operating_point(y_true: np.ndarray, y_pred_proba: np.ndarray, k: int) -> dic
         "k": int(k),
         "threshold": threshold,
         "n_flagged": n_flagged,
-        "n_rows": int(len(y_true)),
+        "n_rows": len(y_true),
         "true_positives": tp,
         "false_positives": fp,
         "false_negatives": fn,

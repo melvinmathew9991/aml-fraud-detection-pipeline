@@ -10,8 +10,11 @@ retrain that silently changes the capacity sweep would be caught here too.
 import pytest
 
 from economics import (
-    net_value, net_value_curve, degeneracy_check,
-    capacity_constraint_cost, ticket_size_crossover,
+    capacity_constraint_cost,
+    degeneracy_check,
+    net_value,
+    net_value_curve,
+    ticket_size_crossover,
 )
 
 # Shaped like the published final-fold capacity sweep (README "Setting the
@@ -93,7 +96,7 @@ def test_ticket_size_crossover_marks_transitions():
     grid = [50, 1_000, 10_000, AVG_FRAUD_AMOUNT]
     df = ticket_size_crossover(SWEEP_ROWS, avg_fraud_amount_grid=grid,
                                 cost_per_review=200, recovery_rate=0.5, liability_rate=1.0)
-    assert df.iloc[0]["is_crossover"] == False
+    assert not df.iloc[0]["is_crossover"]
     # recommendation must be non-decreasing as ticket size grows, holding
     # the other two rates fixed
     recs = df["recommended_reviews_per_day"].tolist()

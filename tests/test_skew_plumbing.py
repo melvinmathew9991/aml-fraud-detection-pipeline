@@ -45,7 +45,7 @@ def test_score_batch_matches_expected_score_to_1e9():
     results = score_batch(bundle, X.tolist())
     probabilities = [r.probability for r in results]
 
-    max_abs_diff = max(abs(p - e) for p, e in zip(probabilities, expected))
+    max_abs_diff = max(abs(p - e) for p, e in zip(probabilities, expected, strict=True))
     assert max_abs_diff < 1e-9, f"max abs diff {max_abs_diff:.3e} exceeds 1e-9"
 
 

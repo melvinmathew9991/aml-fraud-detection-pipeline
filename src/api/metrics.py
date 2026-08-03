@@ -22,7 +22,7 @@ class MetricsTracker:
         self.flagged_count = 0
         self.blocked_count = 0
         self._latencies: deque[float] = deque(maxlen=MAX_TRACKED_LATENCIES)
-        self._score_histogram = {label: 0 for label in SCORE_BUCKET_LABELS}
+        self._score_histogram = dict.fromkeys(SCORE_BUCKET_LABELS, 0)
 
     def record_request(self) -> None:
         self.request_count += 1

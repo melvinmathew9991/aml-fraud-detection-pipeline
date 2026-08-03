@@ -30,8 +30,8 @@ Decisions:
   PASS   -- no rule fired and the model score is below threshold.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 HARD_BLOCK_AMOUNT_THRESHOLD = 1_000_000
 

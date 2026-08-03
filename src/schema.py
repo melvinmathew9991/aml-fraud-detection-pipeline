@@ -18,7 +18,7 @@ off explicitly here rather than silently.
 
 import duckdb
 import pandera.pandas as pa
-from pandera.pandas import Column, Check
+from pandera.pandas import Check, Column
 
 VALID_TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
 

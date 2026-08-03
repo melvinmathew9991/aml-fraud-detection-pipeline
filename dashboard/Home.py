@@ -9,7 +9,6 @@ for ~35s. No `requests` call happens anywhere in this file.
 """
 
 import streamlit as st
-
 from common import load_csv
 
 st.set_page_config(page_title="AML Fraud Detection", page_icon="🔍", layout="wide")

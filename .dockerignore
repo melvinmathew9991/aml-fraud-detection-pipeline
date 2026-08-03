@@ -1,0 +1,20 @@
+# Only src/ and model_bundle/ ever enter the image (see Dockerfile) -- this
+# keeps CI's build-context upload small, since none of the below is needed.
+.venv/
+.git/
+.github/
+.githooks/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+data/
+models/
+mlruns/
+mlflow.db
+reports/
+
+dashboard/
+tests/
+
+*.md

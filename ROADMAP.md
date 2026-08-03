@@ -26,7 +26,7 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | **Serving artifact** | Versioned `model_bundle/v1/` (~9.2MB): LightGBM native format + pure-numpy scaler + `dest_state.parquet` — verified to reproduce the golden file in a `requirements-serve.txt`-only venv | Sprint 3 |
 | Feature set | 18 features (two zero-SHAP features removed, `FEATURE_VERSION` 3) | Sprint 3 |
 | **Serving** | `src/inference/` core (bundle/state/features/score/rules) + FastAPI service (`/health`, `/ready`, `/model-info`, `/score`, `/score/batch`, `/metrics`); both skew tests pass; verified end-to-end (real `uvicorn` process, real HTTP requests) in a `requirements-serve.txt`-only venv | Sprint 4 |
-| **CI/CD** | **Nothing automated** | Sprint 6 |
+| **CI/CD** | GitHub Actions PR gate, green: `lint-test` (ruff → mypy → pytest → smoke-train), `serving-isolation` (serve-deps-only + real uvicorn over HTTP), `container` (build → cold-start → `/score` assertions → trivy) | Sprint 6 |
 | **Deployment** | **Nothing deployed** | Sprint 7 |
 | **Monitoring** | **No drift detection** | Sprint 8 |
 | **Governance** | Prediction audit log live (structured JSON, feature-hashed); model card still absent | Sprint 4 done / Sprint 9 |
@@ -937,7 +937,135 @@ story.
         DoD's 1GB budget. No page loads the full dataset (only
         `data/processed/*.csv` and the bundled 50k sample), but this wasn't
         profiled directly.
-- [ ] Sprint 6 -- containerization & CI
+- [x] Sprint 6 -- containerization & CI. DoD met 2026-08-03 (CI green on
+      the PR, container integration job passing, image size and cold start
+      recorded in README from the run's own output) -- with the <400MB
+      image target missed and recorded as an open deviation, not restated.
+      **An earlier version of this entry claimed "CI green on the PR" while
+      CI had never passed; that was false and the correction is kept here
+      deliberately rather than overwritten.** What actually happened: PR #5 was
+      opened and closed 8 seconds later, unmerged, before CI finished. The
+      single CI run (`30759945313`) **failed**. Root cause was a one-line
+      dependency gap -- `tests/test_dashboard_common.py` imports
+      `dashboard/common.py`, which imports `streamlit`, but `lint-test`
+      installed only `requirements-train.txt` + `requirements-dev.txt`;
+      `streamlit` is pinned in `dashboard/requirements.txt`. pytest died at
+      *collection* (exit 2), so `smoke-train` was skipped and `container`
+      -- which `needs: [lint-test, serving-isolation]` -- never ran at all.
+      It passed locally only because this dev machine happens to have
+      streamlit installed globally, the exact class of environment drift
+      the serving-isolation job exists to catch.
+      **Consequence: the image-size and cold-start numbers this entry
+      previously reported as "measured in CI" were never measured** -- the
+      job that measures them has never executed, and the Dockerfile has
+      never been built anywhere. Both claims are removed from README and
+      from this entry pending a genuinely green run. This is the same
+      recurring defect the Sprint 1 and Sprint 2 audits each caught (docs
+      citing evidence that does not exist), which is what the per-sprint
+      audit step is meant to prevent.
+      **CI reached genuinely green on 2026-08-03** (run `30788266390`,
+      all three jobs including trivy) after five fixes. Each failure was
+      only reachable by fixing the one ahead of it, so they surfaced one
+      per round-trip:
+      1. `lint-test` installed neither `streamlit` (above).
+      2. `serving-isolation` failed its *post-run* step: `--no-cache-dir`
+         contradicts `cache: pip`, leaving `~/.cache/pip` empty so
+         setup-python's cache save errored after every real step passed.
+         Dropped the flag; set explicit `cache-dependency-path` per job,
+         since the default `**/requirements.txt` glob keyed the cache off
+         `dashboard/requirements.txt` -- the only file in the repo matching
+         that name, and the one `lint-test` cares least about.
+      3. `smoke-train` died with `FileNotFoundError`: `data/` is gitignored
+         and git does not track empty directories, so `data/raw/` does not
+         exist in a fresh checkout and `generate_sample_data.py` opened its
+         output path without creating the parent. **The script could never
+         have run on a clean clone.** Fixed with `mkdir(parents=True)`,
+         verified against a scratch root with no `data/` at all -- and
+         deliberately *not* run against the working tree, this being the
+         script that destroyed the real 493MB CSV earlier in this sprint.
+      4. `container` failed at *job setup* in 3s: `trivy-action` tags are
+         v-prefixed, and the pinned bare `0.28.0` does not exist. Moved to
+         `v0.36.0`.
+      5. **The readiness check could not fail.** Its poll loop exited 0
+         whether or not it ever saw a 200, so the first successful build
+         reported `Cold start: 30825 ms` -- the loop's own 60 x 0.5s
+         ceiling -- and passed green while the container was dead. The
+         next step then failed with `curl` exit 7. Rewritten to record
+         whether a 200 was actually observed, fail explicitly if not, and
+         dump `docker ps -a` plus container logs, which the job had never
+         captured. **A green check that cannot go red is worse than no
+         check**, and this one had already manufactured a fake measurement.
+      6. That diagnostic immediately paid for itself: the container was
+         exiting (1) on every run with `OSError: libgomp.so.1: cannot open
+         shared object file`. LightGBM links against the GNU OpenMP
+         runtime, which `python:3.12-slim` does not ship. **No local or
+         non-container test could have caught this** -- `serving-isolation`
+         installs the identical `requirements-serve.txt` but runs on the
+         Ubuntu runner, which has libgomp system-wide. This is the concrete
+         justification for the container job existing.
+      Full suite re-verified locally throughout: 174 passed in 89s.
+      **Measured on the first green run, replacing fabricated figures:
+      image 510.6 MB uncompressed, cold start 3,307 ms, `/score` 5.3 ms
+      in-container (10.3 ms end-to-end).** The previously recorded ~185MB
+      and ~420ms were wrong by 2.8x and 8x respectively.
+      **OPEN -- the image misses this sprint's own <400MB target by 28%.**
+      Prime suspect is `pyarrow`, carried solely to read
+      `dest_state.parquet`, atop the `scipy` `lightgbm` pulls in. Whether
+      to change the bundle's storage format to drop pyarrow is an open
+      decision, not a silent restatement of the target.
+      Delivered:
+      * **First CI in the project's history**: `.github/workflows/ci.yml`,
+        three jobs -- `lint-test` (ruff -> mypy(src/inference) -> pytest ->
+        smoke-train on `generate_sample_data.py` output), `serving-isolation`
+        (installs ONLY `requirements-serve.txt` + pytest, runs the three
+        inference test files with no pandas/duckdb test-fixture dependency,
+        then boots a real `uvicorn` process and hits `/health`/`/ready`/
+        `/score` over HTTP -- automates the manual verification Sprint 4's
+        audit did by hand), and `container` (`docker build` -> run -> poll
+        `/ready` for cold-start timing -> assert `/score` schema ->
+        `docker rm` -> `trivy` scan on CRITICAL/HIGH, `ignore-unfixed`).
+      * **Multi-stage `Dockerfile`** on `python:3.12-slim`, non-root
+        `appuser`, venv-only copy into the final stage (no build toolchain
+        or pip cache in the shipped image), plus `libgomp1` for LightGBM.
+        **510.6 MB measured, over the <400MB target** -- see above and
+        README "Serving image".
+      * **First-ever local lint/type-check pass, done deliberately rather
+        than trusted to ruff's defaults**: `pyproject.toml` pins an explicit
+        `[tool.ruff.lint] select` (ruff 0.16.1 enables ~920 rules by default
+        -- too broad and too version-fragile to trust silently) and scopes
+        `[tool.mypy]` to `src/inference` per this sprint's own DoD. Fixed
+        along the way: a real mypy false-positive in `inference/score.py`
+        (lightgbm's stubs type `predict()` as `list`, not `ndarray`; fixed
+        with an explicit `np.asarray`, not a `type: ignore`), 3 `zip()`
+        calls given explicit `strict=True`, 2 unused loop variables, a
+        redundant `int()` cast removed after checking the underlying
+        `round()`/`len()` calls already return plain Python `int`, and 3
+        deliberate blind-`except` blocks (a UI error boundary, a best-effort
+        git-hash lookup, a SHAP-failure fallback) kept with a targeted
+        `# noqa: BLE001` and inline reason rather than disabling the rule
+        project-wide. Full 174-test suite re-verified passing after every
+        change.
+      * **`docker-compose.yml`** committed for anyone cloning with Docker,
+        explicitly marked CI-verified-only (no Docker on this dev machine).
+      * **One real incident**: mid-sprint, testing the smoke-train step
+        locally ran `generate_sample_data.py`, which overwrote
+        `data/raw/paysim_transactions.csv` -- the same path the real,
+        gitignored ~493MB PaySim dataset lives at -- with a 50k-row
+        synthetic sample, without checking what was there first. Caught via
+        `reports/train_20260801T130131Z.log`'s fold sizes (~1.25M-row test
+        folds, consistent only with the real dataset). Not recoverable
+        locally (an in-place `open(path, "w")`, not a delete, so no Recycle
+        Bin trail); the file is re-downloadable from Kaggle
+        (kaggle.com/datasets/ealaxi/paysim1). Work paused immediately and
+        was disclosed before continuing. **Root cause for next time**: `ls`
+        or equivalent before running any script documented as writing to a
+        path something else might already occupy -- generate_sample_data.py's
+        own docstring says as much ("Replace this file with the real
+        dataset") and should have been read as a warning, not just a usage
+        note.
+      * CI was authenticated and driven via a portable `gh` CLI zip extract
+        (winget's MSI install hit a UAC prompt this non-interactive shell
+        couldn't answer) and the device-code web auth flow.
 - [ ] Sprint 7 -- cloud deployment
 - [ ] Sprint 8 -- monitoring & drift
 - [ ] Sprint 9 -- portfolio polish **(project is complete and shippable here)**

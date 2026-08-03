@@ -529,6 +529,36 @@ MLflow store (`mlflow.db`) — browse with:
 mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
+### Serving image (Sprint 6)
+
+```
+docker build -t fraud-api .
+docker run -p 8000:8080 fraud-api
+# or: docker compose up
+```
+
+Built and integration-tested exclusively in CI (`.github/workflows/ci.yml`)
+— this dev machine has no Docker (ARCHITECTURE.md §8, GIT_WORKFLOW.md).
+
+Measured in CI (run `30788266390`, the first green run — not a local
+benchmark, and not an estimate):
+
+| Metric | Measured |
+|---|---|
+| Image size | **510.6 MB** uncompressed |
+| Cold start (`docker run` → first `200` from `/ready`) | **3,307 ms** |
+| `/score` latency, in-container | **5.3 ms** |
+| `/score` latency, end-to-end over the Docker port mapping | **10.3 ms** |
+
+**The image misses this sprint's own <400MB target by 28%.** Recorded as a
+deviation rather than quietly restated: the prime suspect is `pyarrow`,
+carried solely to read `dest_state.parquet`, on top of the `scipy` that
+`lightgbm` pulls in. Confirming that and deciding whether to change the
+bundle's storage format is open work, tracked in ROADMAP Sprint 6.
+
+Getting the first green run required three real defects to be fixed, none
+of which any local test could have caught — see ROADMAP Sprint 6.
+
 ## Design notes
 
 - **Leakage-safe features**: account-level aggregates (prior transaction

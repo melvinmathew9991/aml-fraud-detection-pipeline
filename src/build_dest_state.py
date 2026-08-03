@@ -34,7 +34,7 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from config import load_config, PROJECT_ROOT
+from config import PROJECT_ROOT, load_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("build_dest_state")

@@ -32,7 +32,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from config import load_config, PROJECT_ROOT
+from config import PROJECT_ROOT, load_config
 
 RAW_COLUMNS = [
     "step", "type", "amount", "nameOrig", "oldbalanceOrg", "newbalanceOrig",

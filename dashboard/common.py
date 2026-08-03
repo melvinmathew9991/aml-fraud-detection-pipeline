@@ -21,7 +21,6 @@ features.py instead of hand-copying it.
 
 import os
 import sys
-import time
 from pathlib import Path
 
 import pandas as pd
@@ -36,9 +35,7 @@ SAMPLE_CSV = DASHBOARD_DIR / "sample_transactions.csv"
 SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
-from features import FEATURE_COLUMNS  # noqa: E402
 from economics import net_value_curve  # noqa: E402
-from model_card import CURRENT_BUNDLE_SNAPSHOT_STEP, MODEL_LIMITATIONS  # noqa: E402
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000").rstrip("/")
 API_TIMEOUT_SECONDS = 5

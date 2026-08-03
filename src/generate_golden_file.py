@@ -20,9 +20,8 @@ from pathlib import Path
 import duckdb
 import joblib
 import numpy as np
-import pandas as pd
 
-from config import load_config, PROJECT_ROOT
+from config import PROJECT_ROOT, load_config
 from cv import time_based_folds
 from features import FEATURE_COLUMNS
 

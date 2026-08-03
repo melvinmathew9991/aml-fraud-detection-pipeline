@@ -32,8 +32,8 @@ def test_every_logisticregression_call_passes_random_state():
 
 def test_saga_solver_is_actually_reproducible_given_a_fixed_seed():
     """Confirms the fix works, not just that the argument is present."""
-    from sklearn.linear_model import LogisticRegression
     import numpy as np
+    from sklearn.linear_model import LogisticRegression
 
     rng = np.random.default_rng(0)
     X = rng.normal(size=(200, 5))

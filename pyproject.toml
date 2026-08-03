@@ -1,0 +1,26 @@
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Deliberately explicit rather than trusting ruff's own default (920+ rules
+# enabled out of the box as of 0.16.1) -- CI must not change behavior
+# silently on a routine `pip install -U ruff`.
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "C4", "BLE", "RUF"]
+# E5 (line length) excluded on purpose: this codebase favors long,
+# explanatory comments over wrapped prose -- see every module's docstring.
+ignore = [
+    "RUF001",  # ambiguous-unicode: dashboard captions deliberately use
+               # real math typography (x2, minus sign) in display strings.
+    "C408",    # unnecessary-collection-call: dict(k=v, ...) as a kwargs
+               # builder is used deliberately for readability in a few
+               # tests/config call sites, not an accident.
+]
+# ISC (implicit string concat) is not selected: this codebase's docstrings
+# and constant lists (e.g. model_card.MODEL_LIMITATIONS) deliberately wrap
+# long prose across adjacent string literals -- ISC004 false-positives on
+# exactly that style.
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/inference"]
+warn_unused_ignores = true

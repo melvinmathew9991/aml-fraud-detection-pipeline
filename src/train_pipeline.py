@@ -47,7 +47,7 @@ End-to-end training pipeline demonstrating:
 import json
 import logging
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import duckdb
 import joblib
@@ -57,25 +57,42 @@ import numpy as np
 import optuna
 import pandas as pd
 import xgboost as xgb
-from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.preprocessing import StandardScaler
 
-from config import load_config, PROJECT_ROOT
+from config import PROJECT_ROOT, load_config
+from custom_metrics import (
+    precision_at_k,
+    recall_at_k,
+    suggest_pos_weight,
+    weighted_bce_loss,
+)
 from cv import time_based_folds
-from features import (
-    feature_query, FEATURE_COLUMNS, BASE_FEATURE_COLUMNS, FEATURE_VERSION,
-    TYPE_FEATURE_COLUMNS, DEST_FEATURE_COLUMNS,
-)
-from custom_metrics import weighted_bce_loss, suggest_pos_weight, precision_at_k, recall_at_k
-from threshold import capacity_k, operating_point, window_days, capacity_sweep
-from schema import validate_raw_sample
-from explain import compute_shap, global_importance, explain_queue, log_global_importance
-from error_analysis import segment_profile, missed_fraud_ranking, log_error_analysis
 from economics import (
-    net_value_curve, degeneracy_check, capacity_constraint_cost, ticket_size_crossover,
+    capacity_constraint_cost,
+    degeneracy_check,
+    net_value_curve,
+    ticket_size_crossover,
 )
+from error_analysis import log_error_analysis, missed_fraud_ranking, segment_profile
+from explain import (
+    compute_shap,
+    explain_queue,
+    global_importance,
+    log_global_importance,
+)
+from features import (
+    BASE_FEATURE_COLUMNS,
+    DEST_FEATURE_COLUMNS,
+    FEATURE_COLUMNS,
+    FEATURE_VERSION,
+    TYPE_FEATURE_COLUMNS,
+    feature_query,
+)
+from schema import validate_raw_sample
+from threshold import capacity_k, capacity_sweep, operating_point, window_days
 
 # Optuna's own per-trial INFO logging would interleave with the pipeline's
 # log stream; tune_model() below logs its own summary line per study instead.
@@ -98,7 +115,7 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 # it (checked via mtime/size in `_load_meta`).
 DB_PATH = PROCESSED_DIR / "paysim.duckdb"
 
-RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+RUN_ID = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,7 +139,7 @@ def git_commit_hash() -> str:
             cwd=PROJECT_ROOT, stderr=subprocess.DEVNULL,
         ).strip())
         return f"{commit}-dirty" if dirty else commit
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- best-effort provenance lookup, must never fail the run
         logger.debug("git_commit_hash: falling back to 'nogit' (%s)", exc)
         return "nogit"
 
@@ -559,7 +576,7 @@ def main():
             "reviews_per_day": reviews_per_day,
         })
 
-        for fold_idx, (X_train, X_test, y_train, y_test, scaler, pos_weight, train_pos_weight) in enumerate(fold_data, start=1):
+        for fold_idx, (X_train, X_test, y_train, y_test, _scaler, pos_weight, train_pos_weight) in enumerate(fold_data, start=1):
             logger.info("=== Fold %d/%d ===", fold_idx, n_folds)
             fold_models = {}
 
@@ -625,7 +642,7 @@ def main():
 
         # Refit tuned params across all CV folds so the comparison table
         # shows a visible tuned-vs-default delta, not just a replacement.
-        for fold_idx, (X_train, X_test, y_train, y_test, scaler, pos_weight, train_pos_weight) in enumerate(fold_data, start=1):
+        for fold_idx, (X_train, X_test, y_train, y_test, _scaler, pos_weight, train_pos_weight) in enumerate(fold_data, start=1):
             xgb_tuned = fit_xgboost(X_train, y_train, X_test, y_test, train_pos_weight,
                                      extra_params=xgb_study.best_params)
             record("XGBoost (tuned)", "xgboost_tuned", fold_idx, y_test,
@@ -753,7 +770,7 @@ def main():
             alert_reasons_df.to_csv(PROCESSED_DIR / "shap_alert_reasons.csv", index=False)
             logger.info("  Wrote per-alert reason codes for %d alerts to shap_alert_reasons.csv",
                         alert_reasons_df["alert_rank"].nunique() if len(alert_reasons_df) else 0)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- SHAP can fail in many ways; carry on rather than lose the run
             # TreeSHAP only covers tree ensembles. If a linear baseline ever
             # wins selection, log it and carry on rather than losing the run.
             logger.warning("  SHAP explainability skipped for %s: %s", best_model_name, exc)
