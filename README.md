@@ -497,6 +497,7 @@ fraud-detection-project/
 ├── ARCHITECTURE.md             # target system design, §-referenced throughout
 ├── GIT_WORKFLOW.md             # branch, commit and branch-protection policy
 ├── AUDIT.md                    # pre-deployment audit, defect register, full commit history
+├── GCP.md                      # GCP free-tier analysis, cost model, deploy checklist
 └── README.md
 ```
 
@@ -672,9 +673,12 @@ of which any local test could have caught — see ROADMAP Sprint 6.
 ## Roadmap
 
 See `ROADMAP.md` for the full sprint-by-sprint plan, `ARCHITECTURE.md`
-for the target system design, and `AUDIT.md` for the pre-deployment audit —
+for the target system design, `AUDIT.md` for the pre-deployment audit —
 the cumulative defect register, the complete commit history, and an explicit
-statement of what the audit did *not* cover. Sprints 0–3 are done: engineering hygiene;
+statement of what the audit did *not* cover — and `GCP.md` for the free-tier
+analysis behind the deployment: measured consumption against every allowance,
+the two settings that separate $0 from a recurring bill, and a pre-deploy
+checklist ordered so the cost controls exist before anything is reachable. Sprints 0–3 are done: engineering hygiene;
 experiment rigor with CV/Optuna/MLflow; the capacity-based operating point,
 destination velocity/graph features, SHAP, and error analysis described
 above; and, in Sprint 3, a `pytest` suite, a pandera ingest schema, the
