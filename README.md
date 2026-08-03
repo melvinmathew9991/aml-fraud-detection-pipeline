@@ -539,9 +539,13 @@ docker run -p 8000:8080 fraud-api
 
 Built and integration-tested exclusively in CI (`.github/workflows/ci.yml`)
 — this dev machine has no Docker (ARCHITECTURE.md §8, GIT_WORKFLOW.md).
-Measured from the CI run, not a local benchmark: **~185MB** uncompressed
-(target was <400MB) and **~420ms** cold start (container `run` to the
-first `200` from `/ready`).
+
+**Image size and cold-start time are not yet measured.** The `container`
+job records both to the CI step summary, but it has never executed: it
+`needs: [lint-test, serving-isolation]`, and `lint-test` failed at pytest
+collection on the first and only run. Numbers go here once a run is green
+— unmeasured is the honest state, and no local benchmark can substitute
+for it while this machine has no Docker.
 
 ## Design notes
 

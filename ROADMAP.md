@@ -937,9 +937,37 @@ story.
         DoD's 1GB budget. No page loads the full dataset (only
         `data/processed/*.csv` and the bundled 50k sample), but this wasn't
         profiled directly.
-- [x] Sprint 6 -- containerization & CI. CI green on the PR from
-      `sprint-6-containerization-ci`; not yet merged to `main`
-      (2026-08-02). Outcomes:
+- [ ] Sprint 6 -- containerization & CI. **NOT complete.** An earlier
+      version of this entry claimed "CI green on the PR"; that was false
+      and is corrected here (2026-08-03). What actually happened: PR #5 was
+      opened and closed 8 seconds later, unmerged, before CI finished. The
+      single CI run (`30759945313`) **failed**. Root cause was a one-line
+      dependency gap -- `tests/test_dashboard_common.py` imports
+      `dashboard/common.py`, which imports `streamlit`, but `lint-test`
+      installed only `requirements-train.txt` + `requirements-dev.txt`;
+      `streamlit` is pinned in `dashboard/requirements.txt`. pytest died at
+      *collection* (exit 2), so `smoke-train` was skipped and `container`
+      -- which `needs: [lint-test, serving-isolation]` -- never ran at all.
+      It passed locally only because this dev machine happens to have
+      streamlit installed globally, the exact class of environment drift
+      the serving-isolation job exists to catch.
+      **Consequence: the image-size and cold-start numbers this entry
+      previously reported as "measured in CI" were never measured** -- the
+      job that measures them has never executed, and the Dockerfile has
+      never been built anywhere. Both claims are removed from README and
+      from this entry pending a genuinely green run. This is the same
+      recurring defect the Sprint 1 and Sprint 2 audits each caught (docs
+      citing evidence that does not exist), which is what the per-sprint
+      audit step is meant to prevent.
+      Fixes applied 2026-08-03: `dashboard/requirements.txt` added to the
+      `lint-test` install; `--no-cache-dir` dropped where it contradicted
+      `cache: pip` (it left `~/.cache/pip` empty, so setup-python's
+      post-run cache save errored and failed `serving-isolation` despite
+      every real step passing); explicit `cache-dependency-path` set per
+      job, since the default `**/requirements.txt` glob keyed the cache off
+      `dashboard/requirements.txt` -- the only file in the repo matching
+      that name. Full suite re-verified locally: 174 passed in 89s.
+      Delivered so far:
       * **First CI in the project's history**: `.github/workflows/ci.yml`,
         three jobs -- `lint-test` (ruff -> mypy(src/inference) -> pytest ->
         smoke-train on `generate_sample_data.py` output), `serving-isolation`
@@ -952,10 +980,9 @@ story.
         `docker rm` -> `trivy` scan on CRITICAL/HIGH, `ignore-unfixed`).
       * **Multi-stage `Dockerfile`** on `python:3.12-slim`, non-root
         `appuser`, venv-only copy into the final stage (no build toolchain
-        or pip cache in the shipped image). **Measured in CI: ~185MB
-        uncompressed** (target was <400MB) and **~420ms cold start**
-        (container `run` to first `200` from `/ready`) -- see README
-        "Serving image".
+        or pip cache in the shipped image). **Written but never built** --
+        size and cold start remain unmeasured until the `container` job
+        runs green; see README "Serving image".
       * **First-ever local lint/type-check pass, done deliberately rather
         than trusted to ruff's defaults**: `pyproject.toml` pins an explicit
         `[tool.ruff.lint] select` (ruff 0.16.1 enables ~920 rules by default

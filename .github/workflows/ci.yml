@@ -19,7 +19,17 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install --no-cache-dir -r requirements-train.txt -r requirements-dev.txt
+          # Explicit, or setup-python's default `**/requirements.txt` glob keys
+          # the cache off dashboard/requirements.txt alone -- the only file in
+          # the repo matching that name, and the one this job cares least about.
+          cache-dependency-path: |
+            requirements-train.txt
+            requirements-dev.txt
+            dashboard/requirements.txt
+      # dashboard/requirements.txt is needed for tests/test_dashboard_common.py:
+      # it imports dashboard/common.py, which imports streamlit. Without it
+      # pytest fails at *collection* and the whole suite is skipped.
+      - run: pip install -r requirements-train.txt -r requirements-dev.txt -r dashboard/requirements.txt
       - name: ruff
         run: ruff check src/ dashboard/ tests/
       - name: mypy (src/inference -- scope set in pyproject.toml)
@@ -42,11 +52,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements-serve.txt
       - name: install ONLY requirements-serve.txt
         # + pytest as a test runner, which is CI tooling, not a runtime
         # import risk -- the point of this job is that api/ and inference/
         # never import anything outside requirements-serve.txt.
-        run: pip install --no-cache-dir -r requirements-serve.txt pytest==9.1.1
+        run: pip install -r requirements-serve.txt pytest==9.1.1
       - name: inference unit tests
         # Only the test files with no pandas/duckdb test-fixture dependency
         # (test_inference_state.py, the skew tests, and test_api.py's
