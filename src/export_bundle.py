@@ -146,9 +146,19 @@ def build_bundle(run_dir: Path, output_dir: Path, dest_state_path: Path) -> None
     sha256 = {
         p.name: _sha256(p) for p in (model_path, scaler_path, threshold_path, dest_state_path)
     }
+    # Read the feature version the model was actually TRAINED with, from the
+    # run's own metadata -- not features.FEATURE_VERSION, which would stamp an
+    # old bundle with whatever the current code says. A run predating the field
+    # cannot be exported unambiguously, so fail loudly rather than guess.
+    if metadata.get("feature_version") is None:
+        raise KeyError(
+            f"{run_dir / 'metadata.json'} has no feature_version. It predates the field; "
+            "re-run training before exporting a bundle from it."
+        )
+
     bundle_meta = {
         "bundle_version": BUNDLE_VERSION,
-        "feature_version": len(metadata["feature_names"]),  # informational; see FEATURE_VERSION
+        "feature_version": metadata["feature_version"],
         "n_features": len(metadata["feature_names"]),
         "git_commit": metadata["git_commit"],
         "run_id": metadata["run_id"],

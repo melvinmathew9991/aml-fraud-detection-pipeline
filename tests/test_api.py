@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import DEFAULT_BUNDLE_DIR, create_app
+from features import FEATURE_VERSION
 
 VALID_TXN = {
     "step": 10,
@@ -261,7 +262,13 @@ def test_model_info_contract(client):
     assert r.status_code == 200
     body = r.json()
     assert body["bundle_version"] == "v1"
-    assert len(body["feature_names"]) == body["feature_version"]
+    assert len(body["feature_names"]) == 18
+    # The SERVED bundle's feature-schema version must match the TRAINING code's.
+    # A mismatch means the committed bundle is stale relative to features.py --
+    # precisely the train/serve skew this project is built to prevent. The old
+    # assertion here compared feature_version against the feature count, which
+    # passed only because export_bundle.py wrote the count into both fields.
+    assert body["feature_version"] == FEATURE_VERSION
     assert isinstance(body["limitations"], list) and len(body["limitations"]) > 0
     assert isinstance(body["dest_state_snapshot_step"], int)
 

@@ -31,7 +31,13 @@ def test_load_bundle_succeeds_on_committed_bundle():
     bundle = load_bundle(REAL_BUNDLE_DIR)
     assert isinstance(bundle, Bundle)
     assert bundle.bundle_version == "v1"
-    assert len(bundle.feature_names) == bundle.feature_version
+    # feature_version is the feature-SCHEMA version, not the feature count.
+    # export_bundle.py wrote the count into both fields until 2026-08-03, and
+    # the assertion that used to live here (len(feature_names) == feature_version)
+    # passed only because of that bug -- it could never have caught it.
+    # No training import here: this file runs in the serving-isolation job.
+    assert len(bundle.feature_names) == bundle.bundle_meta["n_features"] == 18
+    assert bundle.feature_version == 3
 
 
 def test_missing_bundle_meta_raises(tmp_path):
