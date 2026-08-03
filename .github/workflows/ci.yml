@@ -93,11 +93,66 @@ jobs:
       - name: build image
         run: docker build -t fraud-api:ci .
 
-      - name: record image size
+      - name: record image size (uncompressed and registry-storage estimate)
+        # Two different numbers, for two different purposes.
+        #
+        # Uncompressed size is what `docker image inspect` reports and what
+        # Sprint 6's <400MB target was written against. It governs disk and
+        # pull-time on the runner.
+        #
+        # Artifact Registry, however, bills on COMPRESSED storage -- the sum of
+        # the gzipped layer blobs. ROADMAP Sprint 7 sizes its cleanup policy
+        # against a 0.5GB free tier ("keeping 3 versions"), and that plan was
+        # written when the image was believed to be ~185MB. It is 510.6MB. The
+        # retention number therefore has to be recomputed against a measured
+        # compressed size rather than an assumed one -- getting this wrong is
+        # the difference between a $0 deployment and a surprise bill.
+        #
+        # `docker save | gzip` is a close proxy for the registry's stored bytes,
+        # not a byte-identical one: it wraps the layer blobs in a tar that also
+        # carries manifests and metadata, and the registry gzips each layer
+        # separately rather than the whole stream. Reported as an estimate for
+        # that reason. It is accurate enough to choose a retention count.
         run: |
           SIZE_MB=$(docker image inspect fraud-api:ci --format='{{.Size}}' | awk '{printf "%.1f", $1/1024/1024}')
           echo "Image size: ${SIZE_MB} MB (uncompressed)"
-          echo "### Image size: ${SIZE_MB} MB (uncompressed)" >> "$GITHUB_STEP_SUMMARY"
+
+          COMPRESSED_B=$(docker save fraud-api:ci | gzip -9 | wc -c)
+          COMPRESSED_MB=$(awk -v b="$COMPRESSED_B" 'BEGIN{printf "%.1f", b/1048576}')
+          RATIO=$(awk -v c="$COMPRESSED_MB" -v u="$SIZE_MB" 'BEGIN{printf "%.0f", 100*c/u}')
+
+          # Google documents the free tier as "0.5 GB", which is ambiguous:
+          # 0.5 GiB is 512 MiB, 0.5 GB decimal is ~476.8 MiB. The two give
+          # different answers at this image size -- 3 stored versions fit under
+          # the binary reading with 2.6 MiB to spare and breach the decimal one
+          # by 34 MB. Assume the SMALLER bound: a retention policy that only
+          # holds under the favourable interpretation of a billing unit is not
+          # a policy, and the failure mode is a bill rather than a broken build.
+          FREE_MB=476
+          FITS=$(awk -v f="$FREE_MB" -v c="$COMPRESSED_MB" 'BEGIN{printf "%d", int(f/c)}')
+
+          # Must match the cleanup policy in ROADMAP.md Sprint 7.
+          PLANNED_VERSIONS=2
+
+          echo "Compressed (registry storage estimate): ${COMPRESSED_MB} MB (${RATIO}% of uncompressed)"
+          echo "Versions fitting in the free tier (conservative 0.5GB decimal): ${FITS}"
+          echo "Cleanup policy retains: ${PLANNED_VERSIONS}"
+
+          {
+            echo "### Serving image"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Uncompressed | ${SIZE_MB} MB |"
+            echo "| Compressed (registry estimate) | ${COMPRESSED_MB} MB |"
+            echo "| Compression ratio | ${RATIO}% |"
+            echo "| Versions within free tier (conservative) | **${FITS}** |"
+            echo "| Cleanup policy retains | ${PLANNED_VERSIONS} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$FITS" -lt "$PLANNED_VERSIONS" ]; then
+            echo "::warning::Image grew: only ${FITS} version(s) now fit in Artifact Registry's free tier, but the cleanup policy retains ${PLANNED_VERSIONS}. Lower the retention count in ROADMAP Sprint 7 and in the registry policy, or shrink the image."
+          fi
 
       - name: run container, measure cold start, wait for /ready
         # The loop must record whether it actually saw a 200. Without the
