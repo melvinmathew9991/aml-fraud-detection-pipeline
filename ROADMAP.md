@@ -20,7 +20,7 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | Operating point | Capacity-based K + deployable `decision_threshold` | Sprint 2 |
 | Explainability | SHAP global + per-alert reason codes (offline) | Sprint 2 |
 | Error analysis | TP/FP/FN queue profile, missed-fraud ranking | Sprint 2 |
-| **Testing** | `pytest` suite, 66 tests (features/metrics/threshold/cv/schema/economics/bundle/golden-file) | Sprint 3 |
+| **Testing** | `pytest` suite, **174 tests** as of 2026-08-03 (features/metrics/threshold/cv/schema/economics/bundle/golden-file/inference/skew/api/dashboard) | Sprint 3, extended 4-6 |
 | **Data validation** | `pandera` schema on raw ingest (dtypes, ranges, nullability, `type` enum) | Sprint 3 |
 | **Business decision layer** | `src/economics.py` — net value, capacity-constraint cost, ticket-size crossover; naive optimum tested and found degenerate | Sprint 3 |
 | **Serving artifact** | Versioned `model_bundle/v1/` (~9.2MB): LightGBM native format + pure-numpy scaler + `dest_state.parquet` — verified to reproduce the golden file in a `requirements-serve.txt`-only venv | Sprint 3 |
@@ -29,7 +29,7 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | **CI/CD** | GitHub Actions PR gate, green: `lint-test` (ruff → mypy → pytest → smoke-train), `serving-isolation` (serve-deps-only + real uvicorn over HTTP), `container` (build → cold-start → `/score` assertions → trivy) | Sprint 6 |
 | **Deployment** | **Nothing deployed** | Sprint 7 |
 | **Monitoring** | **No drift detection** | Sprint 8 |
-| **Governance** | Prediction audit log live (structured JSON, feature-hashed); model card still absent | Sprint 4 done / Sprint 9 |
+| **Governance** | Prediction audit log live (structured JSON, feature-hashed); model card live (`src/model_card.py`, dashboard page 4, limitations served on `/model-info`) | Sprint 4 / Sprint 5 |
 | **Database** | **None — no persistent store anywhere** | Sprint 10 |
 | **Auth/security** | **None — endpoint would be fully open** | Sprint 10 |
 | **Graph analytics** | Origin-side proven impossible; destination-side unbuilt | Sprint 11 |
@@ -664,7 +664,7 @@ story.
         every staffing level swept, so precision at capacity is bounded by
         queue size, not model quality. At 250 reviews/day: precision 1.000,
         recall 0.951, zero false positives. At 500/day: recall 1.000 but
-        3,833 false positives -- i.e. the last 208 frauds cost ~18 false
+        3,835 false positives -- i.e. the last 208 frauds cost ~18 false
         positives each. That exchange rate, not a single precision number,
         is the deliverable. Scoped to the final fold deliberately: on fold
         1 the same model is *not* at the ceiling (9 of 887 frauds missed,
@@ -1051,9 +1051,13 @@ story.
         locally ran `generate_sample_data.py`, which overwrote
         `data/raw/paysim_transactions.csv` -- the same path the real,
         gitignored ~493MB PaySim dataset lives at -- with a 50k-row
-        synthetic sample, without checking what was there first. Caught via
-        `reports/train_20260801T130131Z.log`'s fold sizes (~1.25M-row test
-        folds, consistent only with the real dataset). Not recoverable
+        synthetic sample, without checking what was there first. Caught at
+        the time via `reports/train_20260801T130131Z.log`'s fold sizes
+        (~1.25M-row test folds, consistent only with the real dataset).
+        **That log no longer exists and `reports/` is gitignored, so this
+        citation is not independently verifiable today** -- flagged rather
+        than left to read as standing evidence, since docs citing evidence
+        that cannot be checked is this repo's most-repeated defect. Not recoverable
         locally (an in-place `open(path, "w")`, not a delete, so no Recycle
         Bin trail); the file is re-downloadable from Kaggle
         (kaggle.com/datasets/ealaxi/paysim1). Work paused immediately and

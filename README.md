@@ -478,7 +478,7 @@ fraud-detection-project/
 │       ├── limits.py             # request body size cap
 │       ├── metrics.py            # in-memory counters backing /metrics
 │       └── audit.py              # structured JSON prediction audit log
-├── tests/                      # pytest suite, 166 tests: features/metrics/threshold/cv/schema/
+├── tests/                      # pytest suite, 174 tests: features/metrics/threshold/cv/schema/
 │                                #   economics/bundle/golden-file/train-determinism/error-analysis/
 │                                #   explain (Sprints 0-3), inference unit + skew (plumbing & state)
 │                                #   + API contract (Sprint 4)
@@ -489,6 +489,7 @@ fraud-detection-project/
 │                                #   verified against a real uvicorn process in an isolated venv
 ├── dashboard/requirements.txt   # Streamlit Community Cloud (Sprint 5)
 ├── ROADMAP.md                  # production-readiness plan, sprint by sprint
+├── AUDIT.md                    # pre-deployment audit, defect register, full commit history
 └── README.md
 ```
 
@@ -618,8 +619,10 @@ of which any local test could have caught — see ROADMAP Sprint 6.
 
 ## Roadmap
 
-See `ROADMAP.md` for the full sprint-by-sprint plan and `ARCHITECTURE.md`
-for the target system design. Sprints 0–3 are done: engineering hygiene;
+See `ROADMAP.md` for the full sprint-by-sprint plan, `ARCHITECTURE.md`
+for the target system design, and `AUDIT.md` for the pre-deployment audit —
+the cumulative defect register, the complete commit history, and an explicit
+statement of what the audit did *not* cover. Sprints 0–3 are done: engineering hygiene;
 experiment rigor with CV/Optuna/MLflow; the capacity-based operating point,
 destination velocity/graph features, SHAP, and error analysis described
 above; and, in Sprint 3, a `pytest` suite, a pandera ingest schema, the
@@ -650,6 +653,8 @@ in the untouched Sprint 0-2 modules, closed the one real gap it did find
 modules without dedicated tests), and fixed a few small drift risks
 (a hardcoded value duplicated instead of shared with its own constant, a
 swallowed exception with no log line, three CSVs generated but never
-logged to MLflow). The `pytest` suite now stands at 166 tests, all
-passing. Next up is the Streamlit dashboard (Sprint 5), followed by CI/CD,
-cloud deployment, drift monitoring, and portfolio polish.
+logged to MLflow). The `pytest` suite stands at **174 tests** as of
+2026-08-03, all passing, and runs in CI on every pull request. The
+Streamlit dashboard (Sprint 5) and containerization/CI (Sprint 6) have
+since shipped; next is cloud deployment (Sprint 7), followed by drift
+monitoring and portfolio polish.

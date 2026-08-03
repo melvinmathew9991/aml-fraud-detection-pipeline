@@ -62,7 +62,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from config import PROJECT_ROOT, load_config
+from config import PROJECT_ROOT, load_config, resolve_tracking_uri
 from custom_metrics import (
     precision_at_k,
     recall_at_k,
@@ -506,7 +506,7 @@ def main():
     run_dir = MODEL_DIR / RUN_ID
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    mlflow.set_tracking_uri(CONFIG["mlflow"]["tracking_uri"])
+    mlflow.set_tracking_uri(resolve_tracking_uri(CONFIG["mlflow"]["tracking_uri"]))
     mlflow.set_experiment(CONFIG["mlflow"]["experiment_name"])
 
     X, y, step = build_feature_frame()

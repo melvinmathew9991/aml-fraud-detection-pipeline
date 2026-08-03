@@ -44,11 +44,29 @@ git config user.email "melvinmathew9991@gmail.com"
 
 ---
 
-## 1. One-time history migration
+## 1. One-time history migration — **DONE (2026-08-01)**
 
-### What needs fixing
+> **Status, verified 2026-08-03 by the pre-deployment audit:** this migration
+> has already been executed. `main` is completely clean — a scan of every
+> commit reachable from `main` finds zero AI trailers, and the Sprint 1 commit
+> is now `947e8ea`, not `0772bb9`. Pre-rewrite history is preserved on
+> `origin/backup/pre-rewrite-2026-08-01` (14 commits).
+>
+> `0772bb9` survives only on the stale merged branches
+> `sprint-1-cv-optuna-mlflow` and `sprint-2-capacity-shap-error-analysis`
+> (local and remote). Both branches' trees are **byte-identical** to their
+> merge commits on `main` (`d26d354`, `1359f7d`), so deleting them loses no
+> work and removes the last non-backup copies of the trailer commit.
+>
+> **Consequence for §6:** branch protection was previously gated on this
+> migration, because protection blocks the force-push it needs. That gate no
+> longer applies — protection can be enabled immediately.
+>
+> The procedure below is retained as a record of what was run.
 
-Exactly one commit carries AI trailers:
+### What needed fixing
+
+Exactly one commit carried AI trailers:
 
 ```
 0772bb9  Sprint 1: XGBoost/LightGBM, time-based CV, Optuna tuning, MLflow tracking
@@ -291,14 +309,35 @@ Both are advisory guards against accident, not security controls.
 
 ## 6. Branch protection on `main`
 
-Configure on GitHub **after** the §1 rewrite (protection blocks force-push):
+**Unblocked as of 2026-08-03:** both preconditions are now met — the §1 rewrite
+is done, and Sprint 6 landed CI (green on `main`, so GitHub has seen the checks
+and can offer them). Nothing is gating this any more. Not yet configured:
+`gh api .../rulesets` returns empty and `main` has no protection.
+
+Create a ruleset named `main-protection` targeting the default branch, with an
+empty bypass list — a bypass for the only person who commits here would make it
+decorative:
 
 - Require a pull request before merging
-- Require status checks to pass — enable once Sprint 6 lands CI
+- **Required approvals: `0`** — solo repo; any other value deadlocks every
+  merge, since you cannot approve your own PR
+- Require status checks to pass, adding all three by name:
+  `Lint, type-check, test, smoke-train`, `Serving dependency isolation`,
+  `Build image, integration test, trivy scan`
 - Require branches to be up to date before merging
 - Block force pushes and deletions
-- Do **not** require approvals (solo repo; self-review on the PR page is the
-  point, and requiring approval would deadlock)
+
+Leave **off**: *require linear history* (this repo merges with merge commits —
+PR #5 landed as `1ec0719`; enabling it blocks every future merge), *require
+signed commits* (nothing here is signed), and *require deployments to succeed*
+(nothing is deployed until Sprint 7).
+
+**Why it is worth doing here specifically:** Sprints 4 and 5 landed as direct
+commits on `main` with no PR and no CI, and Sprint 6's PR was closed 8 seconds
+after opening with CI red while the ROADMAP recorded it as green for a day.
+Both are exactly what "require PR + require status checks" makes structurally
+impossible. This is enforcement of a policy this document already mandates,
+not new policy.
 
 ---
 
