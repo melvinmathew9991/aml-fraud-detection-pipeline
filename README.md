@@ -478,7 +478,7 @@ fraud-detection-project/
 │       ├── limits.py             # request body size cap
 │       ├── metrics.py            # in-memory counters backing /metrics
 │       └── audit.py              # structured JSON prediction audit log
-├── tests/                      # pytest suite, 174 tests: features/metrics/threshold/cv/schema/
+├── tests/                      # pytest suite, 182 tests: features/metrics/threshold/cv/schema/
 │                                #   economics/bundle/golden-file/train-determinism/error-analysis/
 │                                #   explain (Sprints 0-3), inference unit + skew (plumbing & state)
 │                                #   + API contract (Sprint 4)
@@ -488,10 +488,43 @@ fraud-detection-project/
 ├── requirements-serve.txt       # serving image only -- no sklearn/shap/duckdb/mlflow/pandas;
 │                                #   verified against a real uvicorn process in an isolated venv
 ├── dashboard/requirements.txt   # Streamlit Community Cloud (Sprint 5)
+├── tasks.py                    # task runner: `python tasks.py check` == CI's PR gate
+├── pyproject.toml              # ruff + mypy configuration (explicit rule selection)
+├── Dockerfile                  # multi-stage serving image (built and tested in CI only)
+├── .editorconfig               # LF everywhere -- every artifact here runs on Linux
+├── .env.example                # the two env vars that exist; copy to .env (gitignored)
 ├── ROADMAP.md                  # production-readiness plan, sprint by sprint
+├── ARCHITECTURE.md             # target system design, §-referenced throughout
+├── GIT_WORKFLOW.md             # branch, commit and branch-protection policy
 ├── AUDIT.md                    # pre-deployment audit, defect register, full commit history
 └── README.md
 ```
+
+### On the layout
+
+`src/` is a **source root on `sys.path`, not an installable package** — modules
+import each other flatly (`from config import ...`), and `src/api/` and
+`src/inference/` are the only true packages. This is deliberate, not an
+oversight:
+
+- `tests/conftest.py` puts `src/` and `dashboard/` on `sys.path`, which is what
+  Streamlit already does for its own app directory at runtime.
+- The container runs `uvicorn api.main:app --app-dir src`, so serving uses the
+  same import mechanism as the tests.
+- Nothing here is distributed on PyPI, so there is no packaging requirement to
+  satisfy — and adding `[project]` metadata without a working build backend
+  would make `pip install .` a trap.
+
+The trade-off is real and worth naming: it costs a `sys.path` insertion in two
+places, and a strict "src layout" (`src/fraud_detection/` plus
+`pip install -e .`) would remove it. That refactor is deferred rather than
+rejected — it touches every import, the Dockerfile, CI and the `uvicorn`
+target, which is not a change to make immediately before a first deployment.
+
+Documentation lives at the repo root rather than in `docs/` on purpose: the
+four documents are cross-referenced **121 times** by section number
+(`ARCHITECTURE.md §3`, `ROADMAP.md` Sprint 6, …), and moving them buys nothing
+that offsets rewriting every reference.
 
 ## Running it
 
@@ -499,6 +532,25 @@ fraud-detection-project/
 pip install -r requirements-train.txt
 python src/train_pipeline.py
 ```
+
+Common tasks are wrapped by `tasks.py`, so the exact commands do not have to
+be remembered or copy-pasted:
+
+```
+python tasks.py                # list every task
+python tasks.py check          # ruff -> mypy -> pytest, in CI's order
+python tasks.py api            # uvicorn on :8000 with reload
+python tasks.py dashboard      # streamlit
+```
+
+`check` mirrors the CI PR gate deliberately: if it passes locally the gate
+should pass, so failures surface before a ~3-minute round-trip rather than
+after. It is a Python script rather than a `Makefile` because `make` is not
+available in this project's Windows development environment, and a build file
+that cannot be run on the machine that ships it is the same
+documented-but-unverified pattern `AUDIT.md` §5 catalogues. `python tasks.py
+sample-data` additionally **refuses to run** when the real ~493MB PaySim CSV
+is sitting at the output path — the underlying script overwrote it once.
 
 Paths, CV folds, and model/Optuna/MLflow settings live in `config.yaml`, not
 hardcoded in the script. Data loading and feature engineering run through
