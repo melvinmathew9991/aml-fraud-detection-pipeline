@@ -17,6 +17,15 @@ RUN pip install --no-cache-dir -r requirements-serve.txt
 
 FROM python:3.12-slim
 
+# LightGBM's native library links against the GNU OpenMP runtime, which
+# python:3.12-slim does not ship. The wheel installs fine but `import
+# lightgbm` dies at ctypes.LoadLibrary with "libgomp.so.1: cannot open
+# shared object file". The serving-isolation job cannot catch this -- the
+# Ubuntu runner has libgomp system-wide -- so it only appears here.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser
 
 COPY --from=builder /opt/venv /opt/venv
