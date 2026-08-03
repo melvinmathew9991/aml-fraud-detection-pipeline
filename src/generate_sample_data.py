@@ -74,6 +74,10 @@ if __name__ == "__main__":
     n_rows = 50_000
     n_steps = 30  # simulate 30 "hours" of activity, PaySim uses ~744 steps (1 month hourly)
 
+    # data/ is gitignored, so data/raw/ does not exist in a fresh clone or a
+    # CI checkout -- git does not track empty directories.
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
     with open(out_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(HEADER)
