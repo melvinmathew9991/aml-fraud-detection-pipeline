@@ -130,7 +130,9 @@ jobs:
         run: docker rm -f fraud-api-test || true
 
       - name: trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        # Tags are v-prefixed; a bare "0.28.0" does not resolve and fails the
+        # job at setup, before docker build ever runs.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: fraud-api:ci
           format: table
