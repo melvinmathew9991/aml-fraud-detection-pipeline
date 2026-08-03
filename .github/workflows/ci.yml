@@ -31,7 +31,9 @@ jobs:
       # pytest fails at *collection* and the whole suite is skipped.
       - run: pip install -r requirements-train.txt -r requirements-dev.txt -r dashboard/requirements.txt
       - name: ruff
-        run: ruff check src/ dashboard/ tests/
+        # tasks.py included: it lives at the repo root, so the three
+        # directory paths alone would leave it unlinted.
+        run: ruff check src/ dashboard/ tests/ tasks.py
       - name: mypy (src/inference -- scope set in pyproject.toml)
         run: mypy
       - name: pytest

@@ -1,0 +1,30 @@
+# https://editorconfig.org -- keeps whitespace consistent across editors.
+# This repo is developed on Windows (core.autocrlf=true) but every artifact
+# it produces runs on Linux: CI, the python:3.12-slim image, Cloud Run. LF
+# is therefore the correct line ending everywhere, and a stray CRLF is not
+# cosmetic here -- it corrupted model.txt's sha256 once already (fixed in
+# 8e5cff5, prevented from recurring by .gitattributes' `model_bundle/** -text`).
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json,toml}]
+indent_size = 2
+
+[*.md]
+# Trailing whitespace is significant in Markdown (two spaces = line break).
+trim_trailing_whitespace = false
+
+[Makefile]
+# Recipe lines must begin with a literal tab; spaces are a syntax error.
+indent_style = tab
+
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
