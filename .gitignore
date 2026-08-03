@@ -29,6 +29,22 @@ venv/
 *.egg-info/
 .pytest_cache/
 
+# Secrets and cloud credentials. Nothing matching these has ever been
+# committed (verified 2026-08-03 against the full history), and the deploy
+# design deliberately avoids service-account JSON by using Workload Identity
+# Federation (ARCHITECTURE.md §9). These rules exist so that stays true once
+# Sprint 7 introduces GCP and Sprint 10 introduces Neon Postgres and API keys
+# -- the point of a secrets rule is to predate the secret, not follow it.
+.env
+.env.*
+!.env.example
+*-service-account*.json
+*credentials*.json
+gha-creds-*.json
+*.pem
+*.key
+!model_bundle/**/*.key
+
 # OS
 .DS_Store
 Thumbs.db
