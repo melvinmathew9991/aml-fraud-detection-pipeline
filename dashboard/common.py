@@ -37,6 +37,22 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 from economics import net_value_curve  # noqa: E402
 
+# Re-exported for pages/*.py, which import every shared name from `common`
+# rather than reaching into src/ themselves. Both modules are pure constant
+# definitions with zero imports of their own, so this costs the dashboard no
+# dependency -- the same reasoning as net_value_curve above.
+#
+# F401 is suppressed deliberately: nothing in this module *uses* these names,
+# which is exactly what a re-export looks like to a linter. They were dropped
+# from here in Sprint 6 (`0c86106`) as apparently-unused imports, which broke
+# pages/4_Model_Card.py at import time -- a failure no test caught, because
+# tests/test_dashboard_common.py exercises this module and not the pages.
+from features import FEATURE_COLUMNS  # noqa: E402,F401
+from model_card import (  # noqa: E402,F401
+    CURRENT_BUNDLE_SNAPSHOT_STEP,
+    MODEL_LIMITATIONS,
+)
+
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000").rstrip("/")
 API_TIMEOUT_SECONDS = 5
 API_COLD_START_TIMEOUT_SECONDS = 60  # Cloud Run cold start, ARCHITECTURE.md §6
