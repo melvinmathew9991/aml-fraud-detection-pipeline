@@ -474,9 +474,16 @@ main:  above -> docker build -> trivy scan -> push Artifact Registry
   493MB file is gitignored and CI must never need it.
 - **Keyless auth** via Workload Identity Federation. No service-account JSON in
   repo secrets.
-- **Artifact Registry cleanup policy**: keep the 3 most recent versions. The
-  free tier is 0.5GB and a ~150MB compressed image would breach it by the 4th
-  build.
+- **Artifact Registry cleanup policy**: keep the **2 most recent versions**.
+  Revised 2026-08-03 against a measured image rather than the ~150MB this
+  section originally assumed: the real one is **510.6MB uncompressed / 169.8MB
+  compressed** (CI run `30795258811`). Registry storage bills on compressed
+  layers, and Google's "0.5GB" free tier is ambiguous at exactly this size --
+  3 versions fit under the binary reading (512 MiB) with 2.6 MiB to spare and
+  breach the decimal one (500 MB) by 34 MB, so 2 is the only count safe under
+  both. Applied before the first image is pushed, not retrofitted. Full sizing in
+  `GCP.md` §6; the container job re-measures on every build and warns if the
+  image outgrows the policy.
 - Deploy is gated on `/ready` returning 200 with matching `bundle_version`;
   otherwise traffic stays on the previous revision.
 
