@@ -33,7 +33,7 @@ so.
 | 5 | GitHub repository variables | **Partial** 2026-09-09 -- `GCP_PROJECT_ID` withheld |
 | 6 | First deploy via CI | **Done** 2026-09-09 |
 | 7 | Verification, cold start, rollback drill | **Done** 2026-09-09 |
-| 7.5 | Streamlit Community Cloud dashboard | **Deferred** 2026-09-09 |
+| 7.5 | Streamlit Community Cloud dashboard | **Done** 2026-09-09 |
 
 ## 0.1 Established identifiers
 
@@ -52,6 +52,8 @@ below this line has been substituted with these values.
 | Artifact Registry repo | `fraud-api` |
 | Cloud Run service | `fraud-api` |
 | GitHub repo | `melvinmathew9991/aml-fraud-detection-pipeline` |
+| Cloud Run URL | `https://fraud-api-amj2cl4jhq-uc.a.run.app` |
+| Dashboard URL | `https://aml-fraud-detection-pipeline.streamlit.app/` |
 
 The project number and project ID are both used below and are **not**
 interchangeable: WIF resource paths take the number, everything else the ID.
@@ -1086,16 +1088,39 @@ confirming the live URL is unaffected.
 
 ## 7.5 The dashboard: Streamlit Community Cloud
 
-> **Deferred 2026-09-09**, by decision, not oversight. The API deployment is
-> complete and independently verified; the dashboard is a separate hosting
-> target on a separate free tier and blocks nothing on GCP. Sprint 7's four DoD
-> items do not include it. The procedure below is unchanged and ready to run --
-> it needs only the Cloud Run URL, which now exists.
->
-> Consequence while deferred: `dashboard/common.py` falls back to
-> `http://localhost:8000`, so the dashboard runs only on a developer machine
-> with the API running locally. Nothing is publicly broken, because nothing is
-> publicly deployed.
+> **Done 2026-09-09.** Live at **https://aml-fraud-detection-pipeline.streamlit.app/**,
+> pointed at the Cloud Run service. Deferred earlier the same day and then
+> delivered, so Sprint 7 closes with no outstanding scope.
+
+Three things the deploy surfaced that the procedure below did not anticipate.
+
+**Secrets can be set after the first deploy.** §7.5.2 implies they go in during
+creation, under *Advanced settings*. They were missed, the app deployed anyway,
+and adding `API_BASE_URL` afterwards from **Settings -> Secrets** restarted the
+app on its own in under a minute -- no redeploy, no rebuild. The landing page
+was unaffected throughout, because it makes no API call by design. Worth knowing:
+missing this at creation costs nothing.
+
+**It ran on Python 3.14.7.** Nothing else in this project is tested against
+that interpreter -- CI runs 3.11 and 3.12, the container is `python:3.12-slim`,
+and `pyproject.toml` targets `py311`. All four pinned dependencies installed and
+the app runs, so this is a note rather than a defect, but the dashboard is
+currently the only component running on an untested Python. Pin it to 3.12 in
+the app's *Advanced settings* when convenient.
+
+**Streamlit found two candidate requirements files** and chose by its own
+resolution order:
+
+```
+WARN: More than one requirements file detected in the repository.
+Available options: uv .../dashboard/requirements.txt, poetry .../pyproject.toml
+Used: uv with .../dashboard/requirements.txt
+```
+
+It picked correctly. But the choice is not ours to make, and if it ever resolves
+the other way the dashboard installs the full training stack -- `shap`, `numba`,
+`llvmlite`, `mlflow`, `optuna` -- which is the exact separation
+`ARCHITECTURE.md` §3 exists to maintain. Recorded there as well.
 
 `ROADMAP.md` Sprint 7 includes "Deploy Streamlit Community Cloud from the public
 repo, pointed at the API". This runbook did not cover it and §8 did not list it

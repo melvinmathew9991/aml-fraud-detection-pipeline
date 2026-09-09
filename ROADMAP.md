@@ -1129,11 +1129,22 @@ story.
       broken revision's traffic entry carried no `percent` field at all: it was
       never given a share to lose. There is nothing to undo on a failed deploy
       because the healthy revision never stops serving.
-      **Deferred:** the Streamlit Community Cloud dashboard, the one scope item
-      not delivered. It is independent of GCP, blocks nothing in Sprints 8-12,
-      and needs only the (stable) Cloud Run URL. `DEPLOY.md` §7.5 holds the
-      procedure. Until it runs, the project's only public artifact is a JSON
-      API.
+      **Dashboard delivered the same day** at
+      `https://aml-fraud-detection-pipeline.streamlit.app/`, after being
+      deferred earlier -- so Sprint 7 closes with no outstanding scope. Two
+      findings from that deploy: it runs on **Python 3.14.7**, which nothing
+      else here is tested against (CI 3.11/3.12, container 3.12), and Streamlit
+      warned it found **two candidate requirements files** and chose
+      `dashboard/requirements.txt` over `pyproject.toml` by a resolution order
+      the repo does not control -- the other choice would install the full
+      training stack into the dashboard.
+      Deploying it also surfaced a **six-week-old regression**: Sprint 6
+      (`0c86106`) removed three re-exports from `dashboard/common.py` as
+      apparently-unused imports, breaking `pages/4_Model_Card.py` at import
+      time. Nothing caught it -- `ruff` passed, `pytest` passed, CI was green,
+      the container built and deployed -- because no test or job ever imports
+      the pages. Fixed, with `tests/test_dashboard_page_imports.py` now pinning
+      every page's imports against `common`.
       **Left behind deliberately:** revision `fraud-api-00002-dec`, the failed
       drill revision. Cloud Run refuses to delete the latest-created revision;
       it holds 0% traffic, cannot start, and therefore costs nothing. It becomes

@@ -304,6 +304,23 @@ job that installs **only** `requirements-serve.txt` and runs the inference tests
 path. The dashboard file lives in `dashboard/` because Streamlit Community
 Cloud resolves `requirements.txt` relative to the app directory.
 
+**That resolution is not guaranteed, and it matters.** The first deploy
+(2026-09-09) warned that it had found two candidate dependency files and picked
+one:
+
+```
+WARN: More than one requirements file detected in the repository.
+Available options: uv .../dashboard/requirements.txt, poetry .../pyproject.toml
+Used: uv with .../dashboard/requirements.txt
+```
+
+It chose correctly. But the choice belongs to Streamlit's resolver, not to this
+repository, and the other branch of it installs `pyproject.toml` -- the full
+training stack, `shap`/`numba`/`llvmlite`/`mlflow`/`optuna` included -- into the
+dashboard. That is the separation this section exists to maintain, and it is
+currently held by a default rather than by anything enforced. The serving path
+has a CI job proving its isolation; the dashboard path has no equivalent.
+
 ### How the bundle reaches the image
 
 `models/**` is gitignored (run-specific, regenerable). The bundle is not — it is
