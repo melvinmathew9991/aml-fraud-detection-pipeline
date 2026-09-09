@@ -31,9 +31,9 @@ so.
 | 3 | Artifact Registry + cleanup policy | **Done** 2026-09-09 |
 | 4 | Service account + Workload Identity Federation | **Done** 2026-09-09 |
 | 5 | GitHub repository variables | **Partial** 2026-09-09 -- `GCP_PROJECT_ID` withheld |
-| 6 | First deploy via CI | Not started |
-| 7 | Verification, cold start, rollback drill | Not started |
-| 7.5 | Streamlit Community Cloud dashboard | Not started |
+| 6 | First deploy via CI | **Done** 2026-09-09 |
+| 7 | Verification, cold start, rollback drill | **Done** 2026-09-09 |
+| 7.5 | Streamlit Community Cloud dashboard | **Deferred** 2026-09-09 |
 
 ## 0.1 Established identifiers
 
@@ -845,7 +845,80 @@ Note `gh variable list` needs `--repo` when run from outside a clone; without it
 
 ## 6. First deploy
 
-_Written, not yet run._
+### 6.0 PR gate, run 34344122710 (2026-09-09)
+
+Green on all three jobs, with `deploy` skipped as designed -- `GCP_PROJECT_ID`
+was still unset, so the pipeline proved the build without any credential
+exchange or any image reaching the registry.
+
+```
+Lint, type-check, test, smoke-train    success
+Serving dependency isolation           success
+Build image, integration test, trivy   success
+Deploy to Cloud Run                    skipped
+```
+
+**Measured, and the figures have drifted.** The sizing argument in `GCP.md` §6
+and `ARCHITECTURE.md` rests on CI run `30795258811`; this run reports:
+
+| Metric | Run 30795258811 | Run 34344122710 | Change |
+|---|---|---|---|
+| Uncompressed | 510.6 MB | **518.9 MB** | +8.3 MB |
+| Compressed (registry estimate) | 169.8 MB | **172.7 MB** | +2.9 MB |
+| Versions fitting free tier | 2 | **2** | unchanged |
+| Memory after a scored request | -- | **180.9 MiB / 512 MiB (35%)** | -- |
+
+Retention of 2 still holds and no `::warning::` fired, so the policy needs no
+change. But the older numbers are now stale wherever they are quoted as current,
+and the drift is exactly what the re-measuring step exists to surface. The
+compressed figure has roughly 65 MB of headroom before `FITS` drops to 1 and the
+warning does fire.
+
+The memory reading is a **floor**, not a peak: it follows a single-transaction
+score, not the 10,000-row batch `/score/batch` accepts.
+
+### 6.1 The deploy itself
+
+**Done 2026-09-09.** Live at **https://fraud-api-amj2cl4jhq-uc.a.run.app**,
+revision `fraud-api-00001-jr7`, image tag `08fbf53`.
+
+It took two attempts, and the reason is worth recording. The PR was merged with
+`GCP_PROJECT_ID` still unset -- deliberately, per §5.2 -- so the post-merge run
+built and tested everything and then **skipped** `deploy`, leaving `main` green
+and nothing deployed. Setting the variable does not retrigger anything by
+itself; the pipeline needs a workflow run, and `gh run rerun` on the merge
+commit supplied one. The disarmed state is not a failure mode, but it does mean
+"merged and green" is not the same as "deployed", and only the `deploy` job's
+own conclusion distinguishes them.
+
+Verified independently of CI's own smoke test:
+
+```
+$ curl https://fraud-api-amj2cl4jhq-uc.a.run.app/ready
+{"status":"ready","detail":null,"bundle_version":"v1"}
+
+$ curl -X POST .../score -d '{"step":743,"type":"TRANSFER","amount":250000.0,...}'
+decision REVIEW | probability 0.9999998584 | latency_ms 4.78
+reasons: amount_to_balance_ratio 12.69, orig_balance_mismatch 10.65,
+         orig_emptied 8.43, is_transfer 1.14
+```
+
+Cost controls read off the **deployed revision**, which is what `GCP.md` §7 asks
+for rather than trusting the deploy flags:
+
+| Setting | Value |
+|---|---|
+| `minScale` | unset, meaning 0 |
+| `maxScale` | 2 |
+| memory | 512Mi |
+| service account | `fraud-api-runtime@aml-fraud-detection.iam.gserviceaccount.com` |
+
+The service-account line confirms the §4.0 decision reached production: the
+public endpoint runs as an identity holding no roles on anything.
+
+There is no `/` route, so the service's root returns `{"detail":"Not Found"}`.
+The endpoints are `/health`, `/ready`, `/model-info`, `/score`, `/score/batch`,
+`/metrics`, with Swagger UI at `/docs`.
 
 Merging to `main` triggers the full pipeline: `lint-test` → `serving-isolation`
 → `container` (build, integration test, trivy, push) → `deploy`.
@@ -871,10 +944,102 @@ _Written, not yet run._
 
 Sprint 7's DoD (`ROADMAP.md`):
 
-- [ ] public URL serves `/score`
-- [ ] cold-start latency measured and documented
-- [ ] budget alert confirmed active
-- [ ] a deliberately broken deploy rolls back
+- [x] **public URL serves `/score`** -- verified 2026-09-09, §6.1
+- [x] **cold-start latency measured and documented** -- 5.31 s round trip, §7.2
+- [x] **budget alert confirmed active** -- §7.1
+- [x] **a deliberately broken deploy rolls back** -- §7.3
+
+### 7.1 Budget alert, verified rather than asserted
+
+`gcloud billing budgets list` needs `billingbudgets.googleapis.com`, which §1.6
+declined to enable purely to read a setting back. The DoD asks for *confirmed*,
+so it was enabled and the budget read:
+
+```
+?100 Monthly Budget Alert   100  INR   projects/893810819766
+thresholds: 0.5, 0.9, 1.0 (CURRENT_SPEND)
+```
+
+Amount, currency, project scope and all three thresholds match §1.6. The
+operator's earlier confirmation is now evidence.
+
+### 7.3 Rollback drill
+
+The drill was run at the Cloud Run layer rather than by merging a deliberately
+broken commit -- it exercises the same mechanism without putting a known-bad
+commit in `main`'s history. The working image was redeployed with its startup
+command replaced by `sh -c "exit 1"`, using the same `--no-traffic --tag=candidate`
+flags the `deploy` job uses:
+
+```
+$ gcloud run deploy fraud-api --image=<same image> --no-traffic --tag=candidate \
+    --command=sh --args="-c,exit 1" ...
+Deployment failed
+ERROR: The user-provided container failed to start and listen on the port
+defined provided by the PORT=8080 environment variable...
+```
+
+**The failure is the drill passing.** The traffic split afterwards:
+
+```
+{'percent': 100, 'revisionName': 'fraud-api-00001-jr7'}
+{'revisionName': 'fraud-api-00002-dec', 'tag': 'candidate',
+ 'url': 'https://candidate---fraud-api-amj2cl4jhq-uc.a.run.app'}
+```
+
+The broken revision's traffic entry carries **no `percent` field at all**. It
+was never given a share to lose. `ARCHITECTURE.md` §8's "traffic stays on the
+previous revision" is demonstrated, and the property is stronger than rollback:
+there was nothing to undo, because the healthy revision never stopped serving.
+
+What this drill does **not** cover: the `deploy` job's own `/ready` +
+`bundle_version` gate, which guards the case where a container starts
+successfully but serves the wrong bundle. That path remains untested.
+
+### 7.2 Cold start
+
+**Measured 2026-09-09 12:42:27Z, after 21 minutes of verified zero traffic.**
+
+```
+COLD    http=200  tls=0.131s  ttfb=5.311s  total=5.311s
+WARM1   http=200             ttfb=0.323s
+WARM2   http=200             ttfb=0.342s
+```
+
+| | Round trip | Attributable to startup |
+|---|---|---|
+| Cold | **5.311 s** | ~4.98 s |
+| Warm | 0.323-0.342 s | -- |
+
+**Reported as round-trip from India to `us-central1`, not as container startup
+time.** The warm figure of ~0.33 s is almost entirely network transit -- the API
+self-reports `latency_ms` of 4.8 for the same work -- so roughly 0.32 s of the
+cold figure is transit too, leaving ~4.98 s of actual cold start. A measurement
+taken from inside `us-central1` would report a materially smaller number, and
+neither figure is wrong; they answer different questions. This one answers
+"what does a first-time visitor experience", which is the question a portfolio
+link raises.
+
+~5 s sits inside the 3-5 s band `ARCHITECTURE.md` §6 predicted, at the top of
+it. It is the cost of `min-instances=0`, and it is the right trade: the
+alternative, `min-instances=1`, is ~USD 61/month indefinitely (`GCP.md` §5②)
+to save five seconds on an idle portfolio endpoint.
+
+**The first attempt is recorded because it was wrong.** An earlier measurement
+returned 368 ms against 330/319 ms warm -- a 38 ms spread. That is a warm
+instance, and had it been written down as the cold-start figure it would have
+understated the real number by 14x. Cloud Run had not yet scaled to zero. The
+only reliable protocol is a verified idle window with no traffic from any
+source, dashboard included.
+
+Two things this exposed:
+
+- Cloud Run had not yet scaled to zero. A genuine measurement needs a verified
+  idle period with **no** traffic, including from the dashboard.
+- Warm round-trip is ~320 ms while the API self-reports `latency_ms` of ~4.8.
+  So roughly 315 ms of the observed figure is network transit from India to
+  `us-central1`, not compute. Any cold-start number from this location carries
+  that transit cost and should be reported as round-trip, not startup time.
 
 **On cold start:** CI cannot measure this honestly. The smoke test warms the
 very revision that would be measured, and a genuine cold start requires the
@@ -893,7 +1058,16 @@ confirming the live URL is unaffected.
 
 ## 7.5 The dashboard: Streamlit Community Cloud
 
-_Written, not yet run._
+> **Deferred 2026-09-09**, by decision, not oversight. The API deployment is
+> complete and independently verified; the dashboard is a separate hosting
+> target on a separate free tier and blocks nothing on GCP. Sprint 7's four DoD
+> items do not include it. The procedure below is unchanged and ready to run --
+> it needs only the Cloud Run URL, which now exists.
+>
+> Consequence while deferred: `dashboard/common.py` falls back to
+> `http://localhost:8000`, so the dashboard runs only on a developer machine
+> with the API running locally. Nothing is publicly broken, because nothing is
+> publicly deployed.
 
 `ROADMAP.md` Sprint 7 includes "Deploy Streamlit Community Cloud from the public
 repo, pointed at the API". This runbook did not cover it and §8 did not list it

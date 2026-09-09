@@ -80,14 +80,18 @@ Cloud Build's 2,500-minute allowance is never touched.
 
 ## 4. This project's measured consumption
 
-Measured, not estimated. Image figures come from CI run `30795258811`; latency
-from runs `30788266390` / `30792154470`.
+Measured, not estimated. Image figures come from CI run `34344122710`
+(2026-09-09, superseding `30795258811`); container latency from runs
+`30788266390` / `30792154470`; the Cloud Run figures from the live service on
+2026-09-09.
 
 | Metric | Measured |
 |---|---|
-| Image, uncompressed | 510.6 MB |
-| Image, compressed (registry storage) | 169.8 MB (33%) |
+| Image, uncompressed | 518.9 MB |
+| Image, compressed (registry storage) | 172.7 MB (33%) |
 | Cold start (`docker run` → first 200 from `/ready`) | 3,298–3,307 ms |
+| **Cold start, deployed Cloud Run** (India → `us-central1`, 21 min idle) | **5,311 ms round trip** |
+| **Warm round trip, deployed Cloud Run** | **323–342 ms** |
 | `/score` latency, in-container | 5.3 ms |
 | `/score` response size | ~1.2 KB |
 
@@ -158,7 +162,7 @@ which is free for public repositories and removes the GCP dependency entirely.
 ## 6. Artifact Registry — the tight one
 
 The retention policy was originally planned as "3 versions" against an assumed
-~185 MB image. The real image is **510.6 MB uncompressed / 169.8 MB
+~185 MB image. The real image is **518.9 MB uncompressed / 172.7 MB
 compressed**, which invalidated the arithmetic.
 
 Google documents the free tier as "0.5 GB", which is ambiguous, and the two
@@ -175,7 +179,7 @@ holds under the favourable interpretation of a billing unit is not a policy, and
 
 **Layer deduplication is upside, not licence.** Artifact Registry shares layers
 within a repository — *"images with common layers share those layers"* — so two
-versions cost less than 2 × 169.8 MB. The `python:3.12-slim` base (~50 MB) is
+versions cost less than 2 × 172.7 MB. The `python:3.12-slim` base (~50 MB) is
 identical across builds and stored once. Whether the large venv layer dedupes
 depends on `pip install` producing a byte-identical layer in CI, which is not
 guaranteed without a layer cache. **The retention decision assumes no
