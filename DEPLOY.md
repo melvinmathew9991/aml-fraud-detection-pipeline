@@ -996,6 +996,34 @@ What this drill does **not** cover: the `deploy` job's own `/ready` +
 `bundle_version` gate, which guards the case where a container starts
 successfully but serves the wrong bundle. That path remains untested.
 
+#### The drill has a mandatory cleanup step, and skipping it broke the next deploy
+
+**`--command` and `--args` apply to the service template, not to one revision,
+and `gcloud run deploy` merges into existing service config rather than
+replacing it.** So `sh -c "exit 1"` persisted on the service after the drill,
+and the next CI deploy -- a docs-only change, with a correctly built and
+Trivy-clean image -- produced revision `fraud-api-00004-qaf`, which failed to
+start for exactly the same reason the drill revision did.
+
+The reset must be run before any further deploy:
+
+```
+gcloud run services update fraud-api --region=us-central1 --command="" --args=""
+```
+
+An empty string is the documented way to reset either field to the image
+default (`gcloud run services update --help`). Deleting the drill revision does
+**not** do this -- the poisoned setting lives on the service, not the revision,
+which is why the earlier `FAILED_PRECONDITION` on deleting `00002-dec` was a
+red herring rather than the loose end it looked like.
+
+**The failure was contained, and by the mechanism this section exists to
+verify.** Traffic stayed at 100% on `fraud-api-00001-jr7` throughout, so an
+accidental broken deploy -- reaching production through CI, not through a
+deliberate drill -- did not take the service down. That is a stronger
+demonstration of the rollback property than the scripted drill above, because
+nobody arranged it.
+
 ### 7.2 Cold start
 
 **Measured 2026-09-09 12:42:27Z, after 21 minutes of verified zero traffic.**
