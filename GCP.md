@@ -233,7 +233,10 @@ deliberately not the ROADMAP's build order — the controls come first.
 - [ ] **Upgrade to a Paid billing account** (§5①)
 - [ ] **Budget alert at $1/month — before the first deploy, not after**
 - [ ] Enable Artifact Registry + Cloud Run APIs
-- [ ] Create Artifact Registry repo in `us-central1` **with the 2-version cleanup policy applied at creation**
+- [ ] Create Artifact Registry repo in `us-central1`, then **apply the 2-version
+      cleanup policy immediately — before any image is pushed**. This is two
+      commands, not one: `gcloud artifacts repositories create` has no
+      cleanup-policy flag (verified against SDK 581.0.0). See `DEPLOY.md` Phase 3.
 - [ ] Configure Workload Identity Federation (no service-account JSON in repo secrets)
 - [ ] Deploy: `--min-instances=0 --max-instances=2 --memory=512Mi --cpu=1 --concurrency=80 --timeout=30s`
 - [ ] **Verify `min-instances=0` in the deployed revision**, not just the command
