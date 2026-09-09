@@ -75,6 +75,90 @@ RAW_TRANSACTION_FIELDS = [
     "nameDest", "oldbalanceDest", "newbalanceDest",
 ]
 
+# Plain-English name for every model input, for readers who are not going to
+# recognise `dest_amount_to_prior_avg_ratio`. Display only -- the API owns the
+# feature names and this maps onto them; it never renames anything upstream.
+# Keys must stay in sync with src/features.py:FEATURE_COLUMNS, which
+# tests/test_dashboard_feature_labels.py pins.
+FEATURE_LABELS = {
+    "amount": "Amount sent",
+    "hour_of_day": "Hour of the day",
+    "is_night": "Happened overnight",
+    "orig_balance_delta": "Change in the sender's balance",
+    "dest_balance_delta": "Change in the receiver's balance",
+    "orig_balance_mismatch": "Sender's balance doesn't add up",
+    "orig_emptied": "Sender's account was emptied",
+    "amount_to_balance_ratio": "Share of the sender's money moved",
+    "dest_is_merchant": "Receiver is a shop, not a person",
+    "is_transfer": "It's a transfer to another account",
+    "is_cash_out": "It's a cash withdrawal",
+    "is_cash_in": "It's a cash deposit",
+    "is_debit": "It's a debit",
+    "dest_prior_txn_count": "How often this receiver has been paid before",
+    "dest_prior_avg_amount": "What this receiver usually receives",
+    "dest_amount_to_prior_avg_ratio": "How unusual this amount is for the receiver",
+    "dest_txn_count_24h": "Payments to this receiver in the last 24h",
+    "dest_amount_sum_24h": "Total sent to this receiver in the last 24h",
+}
+
+
+def feature_label(name: str) -> str:
+    """Plain-English label for a feature, falling back to the raw name.
+
+    The fallback matters: Sprint 11 adds graph features, and an unmapped new
+    feature should render as its own name rather than vanish or raise.
+    """
+    return FEATURE_LABELS.get(name, name)
+
+
+# One-click examples for the scoring page. Nine fields is a wall for anyone who
+# is not already familiar with PaySim's schema, and a visitor who cannot get a
+# result has not seen the project at all.
+#
+# The fraud example is the same transaction ARCHITECTURE.md and the CI smoke
+# test use: a TRANSFER that moves an account's entire balance to a fresh
+# destination. The legitimate one is a small PAYMENT to a merchant (`M` prefix,
+# which PaySim gives zero balances) with the sender's balance reconciling
+# exactly -- the ordinary case the model should leave alone.
+EXAMPLE_TRANSACTIONS = {
+    "fraud": {
+        "step": 743, "type": "TRANSFER", "amount": 250000.0,
+        "nameOrig": "C1231006815", "oldbalanceOrg": 250000.0, "newbalanceOrig": 0.0,
+        "nameDest": "C1979787155", "oldbalanceDest": 0.0, "newbalanceDest": 250000.0,
+    },
+    "legitimate": {
+        "step": 100, "type": "PAYMENT", "amount": 1500.0,
+        "nameOrig": "C1231006815", "oldbalanceOrg": 50000.0, "newbalanceOrig": 48500.0,
+        "nameDest": "M1979787155", "oldbalanceDest": 0.0, "newbalanceDest": 0.0,
+    },
+}
+
+# Shown next to each input on the scoring page. The raw API field name goes in
+# the tooltip rather than the label: a visitor reads the label, and anyone
+# checking the payload against ARCHITECTURE.md §5 can hover.
+FIELD_HELP = {
+    "step": "PaySim counts time in hours from the start of the simulation. `step`",
+    "type": "What kind of movement this is. `type`",
+    "amount": "How much money moved. `amount`",
+    "nameOrig": "Who sent it. IDs starting with C are customers. `nameOrig`",
+    "oldbalanceOrg": "The sender's balance before. `oldbalanceOrg`",
+    "newbalanceOrig": "The sender's balance after. `newbalanceOrig`",
+    "nameDest": "Who received it. C is a customer, M a merchant. `nameDest`",
+    "oldbalanceDest": "The receiver's balance before. `oldbalanceDest`",
+    "newbalanceDest": "The receiver's balance after. `newbalanceDest`",
+}
+
+# What each decision means, in the words an operations lead would use.
+DECISION_PLAIN = {
+    "BLOCK": ("🔴", "Stop this payment",
+              "A hard rule fired. This does not wait for the model."),
+    "REVIEW": ("🟡", "Send to a human reviewer",
+               "Suspicious enough to be worth an analyst's time, not so certain "
+               "it should be stopped automatically."),
+    "PASS": ("🟢", "Let it through",
+             "Nothing here looks unusual enough to spend a review on."),
+}
+
 
 @st.cache_data
 def load_csv(name: str) -> pd.DataFrame:
