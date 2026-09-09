@@ -271,6 +271,7 @@ git push origin v0.2.0
 |---|---|---|
 | `sprint-N-<slug>` | One per sprint from `ROADMAP.md` | **Merge commit** — preserves the implementation-then-audit story, which is a selling point of this repo |
 | `fix/<slug>` | Bug fix outside a sprint | Squash |
+| `feat/<slug>` | User-facing improvement outside a sprint | Squash |
 | `docs/<slug>` | Documentation only | Squash |
 | `chore/<slug>` | Tooling, deps, gitignore | Squash |
 | `ci/<slug>` | Workflow changes | Squash |
@@ -289,6 +290,15 @@ sprint-7-cloud-deployment              sprint-12-genai-str-narratives
 One PR per sprint. A sprint branch is not opened until the previous sprint's PR
 is merged — the plan is sequential and the dependencies are real (Sprint 11's
 graph output feeds Sprint 12).
+
+**`feat/` was added 2026-09-09**, because the table had a gap. The dashboard's
+plain-language rework — new landing copy, one-click examples on the scoring
+page, a test pinning the label map — is user-facing work that belongs to no
+sprint: it is Sprint 9 polish arriving early. It is not a bug fix, not
+documentation, and not tooling, so it went out under `chore/` against that
+prefix's own definition. A sprint is the unit of *planning* here, not the only
+unit of work, and the branch model should say so rather than forcing everything
+into the nearest wrong box.
 
 ---
 

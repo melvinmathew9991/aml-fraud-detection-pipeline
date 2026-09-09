@@ -191,6 +191,42 @@ the conservative bound, and raises a CI warning if the image outgrows the
 policy. The 185 MB figure went unnoticed for a day; this one is re-measured on
 every run.
 
+### The policy is correct and it did not hold on day one
+
+Observed 2026-09-09, nine hours after the repository was created and seven
+deploys in:
+
+```
+$ gcloud artifacts docker images list .../fraud-api | grep -c sha256
+7
+$ gcloud artifacts repositories describe fraud-api --location=us-central1
+Repository Size: 1017.961MB
+```
+
+**Seven versions and 1,018 MB, against a policy of 2 and an allowance of 500 MB
+— twice the free tier.** The policy was attached, both rules correct, and no
+dry-run flag set. It simply had not run: Artifact Registry evaluates cleanup
+policies on its own schedule, roughly daily, not on push.
+
+The arithmetic above is therefore a description of the **steady state**, not of
+any given moment. A day with seven deploys sits over the allowance for most of
+it, and the cost is real if small — roughly $0.05/month at that overage. The
+five superseded versions were deleted by hand to bring storage back under the
+line rather than waiting for the sweep.
+
+**Two things this changes about how to read this section.** Retention of 2 is
+the floor storage converges to, not a cap it is held under. And $0 is the
+steady-state cost, not a guarantee on a heavy deploy day — the failure mode is
+small and self-correcting, but it is not nothing, and this document claimed
+otherwise.
+
+**A second lag, separate from the first.** After the manual deletion the image
+list showed exactly two versions, while `Repository Size` still reported
+1,017.9 MB — unchanged. That figure is recomputed on Google's schedule too.
+Whether billing reads the live inventory or the lagging metric is not something
+this project has established, so re-check the reported size a day after any
+large deletion rather than assuming it settled.
+
 ---
 
 ## 7. Cost failure modes
