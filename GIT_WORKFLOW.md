@@ -24,6 +24,63 @@ Enforcement is mechanical, not manual — see §5 (`commit-msg` hook). The `.cla
 directory is already gitignored and has never been tracked (verified
 2026-08-01 against full history).
 
+### Known exception: `50ab898` on `main`
+
+**`50ab898` carries a `Claude-Session:` trailer, in violation of this section,
+and it is staying there.** This is a recorded decision, not an oversight — do
+not "fix" it without reading the rest of this subsection first.
+
+**How it happened (2026-09-09).** The agent session that wrote the Sprint 7
+deployment work was configured to append a session-link trailer to every commit
+and PR body. That configuration was followed over this document. It should not
+have been: this file is the authority for this repository. The PR body was
+cleaned afterwards (`gh pr edit`); the commit message was not, because by then
+it had merged.
+
+**Why it was not removed.** A `git filter-branch` rewrite was prepared and
+verified locally — six commits rewritten, trees byte-identical, no content
+changed — and then abandoned at the push. Three costs, none of which existed
+when the removal was first considered:
+
+1. **`v1.0.0` is published above it.** The tag and its GitHub Release sit on
+   `04fa7bd`, five commits after `50ab898`. Rewriting re-points a released tag.
+2. **A second contributor would have to hard-reset.** `meriatjoseph` would need
+   `git fetch && git reset --hard origin/main` before their next push, or the
+   old history returns.
+3. **§6's ruleset forbids it, correctly.** `main-protection` is `active` with
+   rules `deletion`, `non_fast_forward`, `pull_request` and an **empty bypass
+   list** — the design §6 argues for. The force-push was rejected with
+   `GH013: Cannot force-push to this branch`. Removing the trailer would mean
+   disabling branch protection on `main` to delete one line of text.
+
+**What it actually costs to leave.** Close to nothing, and this was verified
+rather than assumed:
+
+- `Claude-Session:` is **not a trailer GitHub recognises**. Only
+  `Co-Authored-By:` with a resolvable email creates an author or contributor
+  entry, and no such trailer exists anywhere in this repository.
+- The contributors API returns exactly two accounts, `melvinmathew9991` (49) and
+  `meriatjoseph` (1). Every commit in full history is authored *and* committed
+  by one of them.
+- The line renders only in the body of that one commit's message. No repository
+  view — contributors, insights, blame, file history, the commit list —
+  surfaces it.
+
+**Why it cannot recur.** §5's `commit-msg` hook existed only as a specification
+until 2026-09-09; `.githooks/` was never created and `core.hooksPath` was never
+set, which is why nothing intercepted the commit. Both hooks now exist, are
+committed, and are tested — the `commit-msg` hook rejects this exact trailer and
+passes clean messages. Activate it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+**If the trailer is ever removed**, the moment to do it is immediately before a
+release rather than after one, with the ruleset temporarily set to `disabled`
+and restored in the same sitting, and with the other contributor told to reset
+first.
+
 ### Identity check
 
 GitHub attributes a commit to an account by matching the **author email** to a
@@ -309,10 +366,28 @@ Both are advisory guards against accident, not security controls.
 
 ## 6. Branch protection on `main`
 
-**Unblocked as of 2026-08-03:** both preconditions are now met — the §1 rewrite
-is done, and Sprint 6 landed CI (green on `main`, so GitHub has seen the checks
-and can offer them). Nothing is gating this any more. Not yet configured:
-`gh api .../rulesets` returns empty and `main` has no protection.
+**DONE — verified active 2026-09-09.** The ruleset below exists and enforces:
+
+```
+$ gh api repos/.../rulesets/20282063
+name:        main-protection
+enforcement: active
+bypass:      []
+rules:       deletion, non_fast_forward, pull_request
+```
+
+It was proven the hard way rather than by inspection: a force-push to `main`
+was rejected with `GH013: Repository rule violations found`, citing both
+`Cannot force-push to this branch` and `Changes must be made through a pull
+request`. The empty bypass list means it binds the repository owner too, which
+is what §0's known exception ran into.
+
+**A note for anyone auditing this:** `gh api repos/OWNER/REPO/branches/main/protection`
+returns `404 Branch not protected` even while this ruleset is active. That
+endpoint covers only *legacy* branch protection; rulesets are a separate API.
+Checking the wrong one produces a confident, wrong "main is unprotected".
+
+The original instructions are retained below as the record of what was created.
 
 Create a ruleset named `main-protection` targeting the default branch, with an
 empty bypass list — a bypass for the only person who commits here would make it
