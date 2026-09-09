@@ -133,7 +133,7 @@ around that reality rather than assuming it away:
 | Tool | Decision |
 |---|---|
 | Docker | **Do not install.** Desktop's WSL2 backend costs ~2GB idle on a dual-core/8GB machine. Images are built and integration-tested in CI only (Sprint 6). |
-| `gcloud` | **Install in Sprint 7** (~150MB, no daemon). Needed for project + Workload Identity Federation setup. |
+| `gcloud` | **Installed** — SDK 581.0.0, verified on PATH 2026-09-09. Used for the Sprint 7 project + Workload Identity Federation setup. |
 | `gh` | Optional convenience in Sprint 6; `git` + the web UI is sufficient. |
 | Neon account | Sprint 10. Free tier, no card. |
 | Gemini API key | Sprint 12. Free tier, no card. Never commit it — Secret Manager + a local `.env` that is gitignored. |
@@ -289,14 +289,16 @@ terminal much faster than the web UI.
 
 **Goal:** a live public URL that costs $0.
 
-- **Install the `gcloud` CLI first (~150MB, no daemon — unlike Docker Desktop
+- **[DONE 2026-09-09]** Install the `gcloud` CLI first (~150MB, no daemon — unlike Docker Desktop
   it is cheap on this hardware).** Verified absent 2026-08-01. It is needed for
   the initial project/WIF setup, which is materially harder through the web
   console alone. Everything after setup runs from CI.
 - GCP project, Artifact Registry repo, **cleanup policy keeping 2 versions**.
   Revised 2026-08-03 from "3 versions" against a measured number. That figure
-  assumed a ~185MB image; the real one is **510.6MB uncompressed / 169.8MB
-  compressed** (measured in CI run `30795258811` — Artifact Registry bills on
+  assumed a ~185MB image; the real one is **518.9MB uncompressed / 172.7MB
+  compressed** (CI run `34344122710`, 2026-09-09; first measured at 510.6/169.8MB in
+  run `30795258811`, and the drift between the two is exactly what the
+  re-measuring step exists to surface — Artifact Registry bills on
   compressed layer storage, so the compressed figure is the one that counts).
   Google documents the free tier as "0.5 GB", which is ambiguous, and the two
   readings disagree at this size:
@@ -1086,7 +1088,56 @@ story.
       * CI was authenticated and driven via a portable `gh` CLI zip extract
         (winget's MSI install hit a UAC prompt this non-interactive shell
         couldn't answer) and the device-code web auth flow.
-- [ ] Sprint 7 -- cloud deployment
+- [x] Sprint 7 -- cloud deployment (2026-09-09). **Live at
+      `https://fraud-api-amj2cl4jhq-uc.a.run.app`**, revision
+      `fraud-api-00001-jr7`, project `aml-fraud-detection` (`893810819766`)
+      under org `meriatmelvin-org`. Full runbook with every command and its
+      recorded output in `DEPLOY.md`.
+      **All four DoD items met, each verified independently of CI's own smoke
+      test:** public URL serves `/score` (decision REVIEW, `latency_ms` 4.78);
+      cold start **5,311 ms** round trip after 21 minutes of verified idle,
+      against 323-342 ms warm; budget alert read back from the billing API as
+      ₹100/`projects/893810819766` with thresholds 0.5/0.9/1.0; and a
+      deliberately broken deploy proven not to take traffic.
+      Six findings worth carrying forward:
+      (1) **The org changed the plan.** The account sits under an organization,
+      which `DEPLOY.md` was not written for. The check that mattered --
+      `iam.allowedPolicyMemberDomains`, which would have blocked
+      `--allow-unauthenticated` and made the DoD unachievable -- came back
+      `allowAll: true`, so nothing was needed. It cost one command to rule out
+      and would have surfaced as an opaque IAM error at deploy time otherwise.
+      (2) **`aml-fraud-detection` was available.** `DEPLOY.md` §1.3 predicted the
+      bare ID would be taken and pre-emptively suffixed it; Phase 1 ran twice as
+      a result, and the `-9991` project was deleted.
+      (3) **"Merged and green" is not "deployed".** The PR was merged with
+      `GCP_PROJECT_ID` deliberately unset, so the post-merge run skipped
+      `deploy` and left `main` green with nothing deployed. Setting the variable
+      does not retrigger anything; only the `deploy` job's own conclusion
+      distinguishes the two states.
+      (4) **The runtime-identity premise was wrong, the decision was not.**
+      `DEPLOY.md` §4.0 argued for a dedicated runtime SA on the grounds that the
+      Compute Engine default SA would not exist without `compute.googleapis.com`.
+      It existed anyway. The dedicated zero-role SA still shipped, on
+      least-privilege grounds -- the default is a *shared* identity every future
+      service in the project would inherit.
+      (5) **The first cold-start measurement was wrong by 14x.** 368 ms against
+      330 ms warm is a warm instance, not a cold start; Cloud Run had not scaled
+      to zero. Recorded next to the correct figure in `DEPLOY.md` §7.2, because
+      the failure mode -- writing down a warm number under a cold label -- is
+      this project's recurring defect.
+      (6) **The rollback drill proves something stronger than rollback.** The
+      broken revision's traffic entry carried no `percent` field at all: it was
+      never given a share to lose. There is nothing to undo on a failed deploy
+      because the healthy revision never stops serving.
+      **Deferred:** the Streamlit Community Cloud dashboard, the one scope item
+      not delivered. It is independent of GCP, blocks nothing in Sprints 8-12,
+      and needs only the (stable) Cloud Run URL. `DEPLOY.md` §7.5 holds the
+      procedure. Until it runs, the project's only public artifact is a JSON
+      API.
+      **Left behind deliberately:** revision `fraud-api-00002-dec`, the failed
+      drill revision. Cloud Run refuses to delete the latest-created revision;
+      it holds 0% traffic, cannot start, and therefore costs nothing. It becomes
+      deletable after the next deploy to `main`.
 - [ ] Sprint 8 -- monitoring & drift
 - [ ] Sprint 9 -- portfolio polish **(project is complete and shippable here)**
 - [x] Market-alignment review of the plan against 2026 DS hiring requirements

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Blocks the two mistakes that are painful to undo (GIT_WORKFLOW.md §5).
+# Advisory guards against accident, not security controls.
+
+# 1. Large files (the 493MB raw CSV, the 684MB DuckDB store)
+for f in $(git diff --cached --name-only --diff-filter=A); do
+  [ -f "$f" ] || continue
+  sz=$(wc -c < "$f")
+  if [ "$sz" -gt 20971520 ]; then
+    echo "pre-commit: $f is $((sz/1048576))MB (>20MB). Intended? See .gitignore." >&2
+    exit 1
+  fi
+done
+
+# 2. Secrets (Gemini key from Sprint 12, Neon connection string from Sprint 10)
+if git diff --cached | grep -qE 'AIza[0-9A-Za-z_-]{35}|postgres(ql)?://[^ ]+:[^ ]+@'; then
+  echo "pre-commit: possible secret in staged diff." >&2
+  exit 1
+fi

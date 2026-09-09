@@ -1,0 +1,9 @@
+#!/bin/sh
+# Enforces GIT_WORKFLOW.md §0: commits are authored solely by the repository
+# owner. Written 2026-09-09, after a Claude-Session trailer reached `main` on
+# commit 50ab898 -- §5 had specified this hook since 2026-08-01 but .githooks/
+# was never created, so the "mechanical, not manual" enforcement was notional.
+if grep -qiE 'co-authored-by:.*(claude|anthropic|copilot)|claude-session|generated with \[?claude' "$1"; then
+  echo "commit-msg: AI attribution trailer found. See GIT_WORKFLOW.md §0." >&2
+  exit 1
+fi

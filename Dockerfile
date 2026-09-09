@@ -1,5 +1,8 @@
 # Serving image only (ARCHITECTURE.md §3/§8). Built and run exclusively in
-# CI -- this machine has no Docker (see GIT_WORKFLOW.md / ROADMAP Sprint 6).
+# CI. Docker Desktop was absent from this machine when the file was written
+# and was installed 2026-09-09; CI remains the authoritative build, because it
+# also enforces the 512MiB Cloud Run ceiling and runs Trivy, which a bare local
+# `docker build` does not (see GIT_WORKFLOW.md / ROADMAP Sprint 6).
 #
 # Two stages so the final image never carries pip's build cache or a
 # compiler toolchain: stage 1 resolves requirements-serve.txt into a venv,

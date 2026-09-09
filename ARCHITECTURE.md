@@ -476,8 +476,9 @@ main:  above -> docker build -> trivy scan -> push Artifact Registry
   repo secrets.
 - **Artifact Registry cleanup policy**: keep the **2 most recent versions**.
   Revised 2026-08-03 against a measured image rather than the ~150MB this
-  section originally assumed: the real one is **510.6MB uncompressed / 169.8MB
-  compressed** (CI run `30795258811`). Registry storage bills on compressed
+  section originally assumed: the real one is **518.9MB uncompressed / 172.7MB
+  compressed** (CI run `34344122710`, 2026-09-09; first measured at 510.6/169.8MB in run
+  `30795258811` and re-measured on every build since). Registry storage bills on compressed
   layers, and Google's "0.5GB" free tier is ambiguous at exactly this size --
   3 versions fit under the binary reading (512 MiB) with 2.6 MiB to spare and
   breach the decimal one (500 MB) by 34 MB, so 2 is the only count safe under
