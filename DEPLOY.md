@@ -514,6 +514,13 @@ At 169.8 MB compressed, a third version transiently present is 509 MB against a
 policy and by `max 2` builds mattering at a time, not by anything this runbook
 does, and it is recorded rather than papered over.
 
+**Understated, as it turned out.** That paragraph models one transient third
+version for "some hours". What actually happened on 2026-09-09 was **seven
+versions and 1,018 MB after nine hours** — twice the allowance, not 2% over it —
+because the sweep had not run at all, and the day carried seven deploys rather
+than one. The policy was attached and correct throughout; nothing was
+misconfigured. See `GCP.md` §6 for the full record and the manual cleanup.
+
 **Done 2026-09-09.** Repository created, then the policy applied on a second
 command exactly as §3.3 warns. The dry run was skipped deliberately: the
 repository was empty, so a simulated sweep had nothing to report.
@@ -1101,12 +1108,17 @@ app on its own in under a minute -- no redeploy, no rebuild. The landing page
 was unaffected throughout, because it makes no API call by design. Worth knowing:
 missing this at creation costs nothing.
 
-**It ran on Python 3.14.7.** Nothing else in this project is tested against
-that interpreter -- CI runs 3.11 and 3.12, the container is `python:3.12-slim`,
-and `pyproject.toml` targets `py311`. All four pinned dependencies installed and
-the app runs, so this is a note rather than a defect, but the dashboard is
-currently the only component running on an untested Python. Pin it to 3.12 in
-the app's *Advanced settings* when convenient.
+**It first ran on Python 3.14.7, and is now pinned to 3.12.** Skipping *Advanced
+settings* at creation let Streamlit choose its own default, and it chose an
+interpreter nothing else in this project is tested against -- CI runs 3.11 and
+3.12, the container is `python:3.12-slim`, `pyproject.toml` targets `py311`. All
+four pinned dependencies installed and the app ran, so it was a latent
+inconsistency rather than a break: the dashboard was the only component on an
+untested Python. Pinned to **3.12** in the app's settings on 2026-09-09, which
+matches the serving container.
+
+The general lesson is the one §7.5.1 should have stated outright: **an unset
+version is a choice, made by the platform, that you inherit.**
 
 **Streamlit found two candidate requirements files** and chose by its own
 resolution order:

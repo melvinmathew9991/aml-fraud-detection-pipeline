@@ -1132,8 +1132,9 @@ story.
       **Dashboard delivered the same day** at
       `https://aml-fraud-detection-pipeline.streamlit.app/`, after being
       deferred earlier -- so Sprint 7 closes with no outstanding scope. Two
-      findings from that deploy: it runs on **Python 3.14.7**, which nothing
-      else here is tested against (CI 3.11/3.12, container 3.12), and Streamlit
+      findings from that deploy: it came up on **Python 3.14.7**, which nothing
+      else here is tested against (CI 3.11/3.12, container 3.12) -- since pinned
+      to 3.12 to match the serving container -- and Streamlit
       warned it found **two candidate requirements files** and chose
       `dashboard/requirements.txt` over `pyproject.toml` by a resolution order
       the repo does not control -- the other choice would install the full
