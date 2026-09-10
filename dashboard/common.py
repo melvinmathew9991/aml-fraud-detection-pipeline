@@ -19,6 +19,7 @@ inference/features.py uses to import FEATURE_COLUMNS from training's
 features.py instead of hand-copying it.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -183,6 +184,14 @@ def compute_net_value_curve(cost_per_review: float, recovery_rate: float,
     page script and any test can share the exact same call."""
     return net_value_curve(capacity_sweep_rows(), avg_fraud_amount,
                            cost_per_review, recovery_rate, liability_rate)
+
+
+@st.cache_data
+def load_json(name: str) -> dict:
+    """Loads a committed data/processed/<name>.json. Same contract as load_csv:
+    small, static, read-only artifacts produced by a job in src/."""
+    with open(DATA_PROCESSED / f"{name}.json") as f:
+        return json.load(f)
 
 
 @st.cache_data
