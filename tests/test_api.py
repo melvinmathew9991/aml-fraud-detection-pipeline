@@ -47,6 +47,40 @@ def client():
 
 # ---------------------------------------------------------------- health/ready
 
+def test_root_returns_an_index_not_a_404(client):
+    """Regression cover for a real defect found by auditing the deployment.
+
+    The service declared six routes and none at `/`, so every visitor who opened
+    the public URL got a bare 404. That was 100% of the deployment's 4xx rate --
+    17 of 103 requests over 30 days, all of them `/` or `/favicon.ico`, none of
+    them attack traffic. Meanwhile FastAPI's interactive Swagger UI was live and
+    public at `/docs`, one undiscoverable path away.
+    """
+    r = client.get("/")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["docs"] == "/docs"
+    assert body["bundle_version"] == "v1"
+    # The index must not advertise a path the service does not serve -- a
+    # landing page listing dead links is worse than no landing page.
+    for path in body["endpoints"]:
+        assert client.get(path).status_code != 404, f"index advertises missing {path}"
+
+
+def test_root_answers_before_the_bundle_is_loaded():
+    """`/` is deliberately not gated on readiness. It is the first thing a human
+    sees, and "the service is here, the docs are there" beats a 503 while the
+    bundle loads."""
+    app = create_app(rate_limit_max_requests=10_000)
+    # No `with` block, so lifespan never runs and app.state.service is absent.
+    r = TestClient(app).get("/")
+
+    assert r.status_code == 200
+    assert r.json()["bundle_version"] is None
+    assert r.json()["docs"] == "/docs"
+
+
 def test_health_ok(client):
     r = client.get("/health")
     assert r.status_code == 200
