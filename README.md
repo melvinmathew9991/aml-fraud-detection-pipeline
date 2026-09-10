@@ -697,11 +697,26 @@ deviation rather than quietly restated: the prime suspects were `pyarrow`,
 carried solely to read `dest_state.parquet`, on top of the `scipy` that
 `lightgbm` pulls in.
 
-**Both confirmed, one fixed (2026-09-10).** `pyarrow` was 84.3 MB of a 133.6 MB
-dependency footprint for a single call, and the v2 bundle's `.npz` removed it —
-see ARCHITECTURE.md §3. `scipy` is 112.7 MB and stays: `lightgbm` requires it
+**Both confirmed, one fixed, and the target is now met (2026-09-10).** `pyarrow`
+was carried for a single call, and the v2 bundle's `.npz` removed it — see
+ARCHITECTURE.md §3. `scipy` is 112.7 MB and stays: `lightgbm` requires it
 outright, not as an extra, and imports it eagerly, so a `--no-deps` install
 would break `import lightgbm`. Measured and rejected rather than left open.
+
+Measured by CI (the container job, which is the authority — a local estimate put
+the image at ~435 MB and was 68 MB pessimistic):
+
+| Metric | Before | After |
+|---|---|---|
+| Image, uncompressed | 519.0 MB | **367.5 MB** |
+| Compressed (registry storage) | 172.7 MB | **125.0 MB** |
+| Cold start (`docker run` → first `200`) | 2,761 ms | **2,234 ms** |
+| Memory after a scored request | 190.7 MiB | **71.96 MiB** |
+| Versions inside the 0.5GB free tier | 2 | **3** |
+
+So the <400MB target is met with 32.5 MB to spare, and the registry now holds
+three versions inside the conservative free-tier reading — which also resolves
+the "over the allowance between cleanup sweeps" finding in `GCP.md` §6.
 
 Getting the first green run required three real defects to be fixed, none
 of which any local test could have caught — see ROADMAP Sprint 6.

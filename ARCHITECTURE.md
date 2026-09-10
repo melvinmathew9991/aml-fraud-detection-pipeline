@@ -284,6 +284,11 @@ the build and the lookup cannot drift apart. The loader still verifies the keys
 it was handed are strictly increasing, because the lookup is a `searchsorted`
 that returns wrong answers rather than failing on unsorted input.
 
+Measured by CI after the change: image **519.0 -> 367.5 MB** uncompressed,
+**172.7 -> 125.0 MB** compressed, cold start **2,761 -> 2,234 ms**, and memory
+after a scored request **190.7 -> 71.96 MiB**. Three registry versions now fit
+the free tier where two did before.
+
 v2 is a **packaging** bump: same model, same scaler, same threshold, same
 `run_id`. `bundle_version` identifies the artifact; the model identity lives in
 `run_id` / `trained_at` / `git_commit`. v2's arrays were converted from v1's
