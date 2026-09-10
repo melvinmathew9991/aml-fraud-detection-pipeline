@@ -184,6 +184,30 @@ readings disagree at exactly this size:
 | 2 versions | fits, +172 MiB | fits, +144 MB |
 | 3 versions | fits, **+2.6 MiB** | **breaches, −34 MB** |
 
+### The arithmetic above is steady-state, and steady state is not where the repo lives
+
+**Measured 2026-09-10: the repository is 601.92 MB — over the allowance on
+either reading** (+101.9 MB against 0.5 GB decimal, +65.0 MB against 0.5 GiB).
+The policy is correctly configured and enforcing (`keep-2-most-recent`,
+`keepCount: 2`, plus `delete-everything-else`), and three image versions are
+present anyway.
+
+The reason is that Artifact Registry cleanup policies run on their own
+schedule — roughly daily — not on push. Every deploy therefore opens a window in
+which a third version coexists with the two the policy intends to keep, and the
+table above, which reasoned about how many versions *fit*, never asked how many
+would be *present*. A retention count of 2 does not mean 2 objects at all times;
+it means 2 after the next sweep.
+
+The money is trivial — the overage bills at roughly **$0.01/month** — and it does
+not change the retention decision, which remains right. What it changes is the
+claim: this repository is not continuously inside the free tier, it is inside it
+between sweeps. That is a different sentence, and the honest one.
+
+A steady 2 versions would also leave no rollback depth beyond the previous
+revision — see `MONITORING.md` §5, where the same policy turns out to bound
+recoverability as well as cost.
+
 **Retention is set to 2**, which is safe under both readings. A policy that only
 holds under the favourable interpretation of a billing unit is not a policy, and
 0.5% headroom is erased by one dependency bump.
