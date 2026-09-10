@@ -57,7 +57,7 @@ def task_lint() -> int:
 
 
 def task_typecheck() -> int:
-    """Run mypy (scope is pinned to src/inference in pyproject.toml)."""
+    """Run mypy (scope is pinned to src/inference + src/monitoring in pyproject.toml)."""
     return py("-m", "mypy")
 
 
@@ -91,6 +91,11 @@ def task_train() -> int:
 def task_bundle() -> int:
     """Re-export the serving bundle from the latest run under models/."""
     return py("src/export_bundle.py")
+
+
+def task_drift() -> int:
+    """Recompute the PSI series over dataset time (~2 min; needs the DuckDB store)."""
+    return py("src/run_drift.py")
 
 
 def task_sample_data() -> int:
@@ -140,6 +145,7 @@ TASKS = {
     "dashboard": task_dashboard,
     "train": task_train,
     "bundle": task_bundle,
+    "drift": task_drift,
     "sample-data": task_sample_data,
     "clean": task_clean,
 }

@@ -58,7 +58,7 @@ jobs:
         # tasks.py included: it lives at the repo root, so the three
         # directory paths alone would leave it unlinted.
         run: ruff check src/ dashboard/ tests/ tasks.py
-      - name: mypy (src/inference -- scope set in pyproject.toml)
+      - name: mypy (src/inference + src/monitoring -- scope set in pyproject.toml)
         run: mypy
       - name: pytest
         run: pytest -q

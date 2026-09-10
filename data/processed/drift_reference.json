@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-09-10T07:30:31.497522+00:00",
+  "run_id": "20260910T072817Z",
+  "git_commit": "926e1d5-dirty",
+  "bundle_version": "v1",
+  "feature_version": 3,
+  "model_name": "LightGBM (tuned)",
+  "decision_threshold": 8.077004481140283e-06,
+  "features": [
+    "amount",
+    "hour_of_day",
+    "is_night",
+    "orig_balance_delta",
+    "dest_balance_delta",
+    "orig_balance_mismatch",
+    "orig_emptied",
+    "amount_to_balance_ratio",
+    "dest_is_merchant",
+    "is_transfer",
+    "is_cash_out",
+    "is_cash_in",
+    "is_debit",
+    "dest_prior_txn_count",
+    "dest_prior_avg_amount",
+    "dest_amount_to_prior_avg_ratio",
+    "dest_txn_count_24h",
+    "dest_amount_sum_24h"
+  ],
+  "reference": {
+    "definition": "final training fold (src/cv.py, config cv.fold_boundaries)",
+    "fold_boundaries": [
+      0.4,
+      0.6,
+      0.8,
+      1.0
+    ],
+    "step_min": 1,
+    "step_max": 355,
+    "n_rows": 5113884,
+    "n_fraud": 3963
+  },
+  "windows": {
+    "unit": "simulated day",
+    "steps_per_window": 24,
+    "count": 31
+  },
+  "thresholds": {
+    "feature_psi": 0.25,
+    "score_psi": 0.1,
+    "min_comparison_rows": 1000,
+    "bands": {
+      "stable": "< 0.10",
+      "moderate": "0.10-0.25",
+      "significant": ">= 0.25"
+    }
+  }
+}
