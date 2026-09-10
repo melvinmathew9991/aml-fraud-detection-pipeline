@@ -4,7 +4,7 @@ This document tracks what's needed to take this project from a working
 scaffold (proven correct on the real 6.36M-row PaySim dataset) to a
 production-shaped, end-to-end system suitable for a portfolio deep-dive.
 
-## 1. Current state (as of 2026-08-02, end of Sprint 4)
+## 1. Current state (as of 2026-09-10, end of Sprint 8)
 
 | Area | State | Closed by |
 |---|---|---|
@@ -20,15 +20,15 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | Operating point | Capacity-based K + deployable `decision_threshold` | Sprint 2 |
 | Explainability | SHAP global + per-alert reason codes (offline) | Sprint 2 |
 | Error analysis | TP/FP/FN queue profile, missed-fraud ranking | Sprint 2 |
-| **Testing** | `pytest` suite, **174 tests** as of 2026-08-03 (features/metrics/threshold/cv/schema/economics/bundle/golden-file/inference/skew/api/dashboard) | Sprint 3, extended 4-6 |
+| **Testing** | `pytest` suite, **231 tests** as of 2026-09-10 (features/metrics/threshold/cv/schema/economics/bundle/golden-file/inference/skew/api/dashboard/drift) | Sprint 3, extended 4-8 |
 | **Data validation** | `pandera` schema on raw ingest (dtypes, ranges, nullability, `type` enum) | Sprint 3 |
 | **Business decision layer** | `src/economics.py` — net value, capacity-constraint cost, ticket-size crossover; naive optimum tested and found degenerate | Sprint 3 |
 | **Serving artifact** | Versioned `model_bundle/v1/` (~9.2MB): LightGBM native format + pure-numpy scaler + `dest_state.parquet` — verified to reproduce the golden file in a `requirements-serve.txt`-only venv | Sprint 3 |
 | Feature set | 18 features (two zero-SHAP features removed, `FEATURE_VERSION` 3) | Sprint 3 |
 | **Serving** | `src/inference/` core (bundle/state/features/score/rules) + FastAPI service (`/health`, `/ready`, `/model-info`, `/score`, `/score/batch`, `/metrics`); both skew tests pass; verified end-to-end (real `uvicorn` process, real HTTP requests) in a `requirements-serve.txt`-only venv | Sprint 4 |
 | **CI/CD** | GitHub Actions PR gate, green: `lint-test` (ruff → mypy → pytest → smoke-train), `serving-isolation` (serve-deps-only + real uvicorn over HTTP), `container` (build → cold-start → `/score` assertions → trivy) | Sprint 6 |
-| **Deployment** | **Nothing deployed** | Sprint 7 |
-| **Monitoring** | **No drift detection** | Sprint 8 |
+| **Deployment** | Live on Cloud Run at `https://fraud-api-amj2cl4jhq-uc.a.run.app`; dashboard on Streamlit Community Cloud. Deploy-without-traffic + smoke test + rollback drill all verified (`DEPLOY.md`) | Sprint 7 |
+| **Monitoring** | PSI per feature + on the score, over 31 windows of dataset time (`src/monitoring/drift.py`, `src/run_drift.py`); injected-shift detector tests; retraining criteria and champion/challenger path in `MONITORING.md`; daily scheduled service + stale-reference check | Sprint 8 |
 | **Governance** | Prediction audit log live (structured JSON, feature-hashed); model card live (`src/model_card.py`, dashboard page 4, limitations served on `/model-info`) | Sprint 4 / Sprint 5 |
 | **Database** | **None — no persistent store anywhere** | Sprint 10 |
 | **Auth/security** | **None — endpoint would be fully open** | Sprint 10 |
@@ -342,14 +342,32 @@ ARCHITECTURE §9 ships with the first deploy.
 - Thresholds: PSI > 0.25 (feature) or > 0.10 (score) raises a flag.
 - **Detector unit test with injected shifts** (mean, variance, category
   re-weighting) — this is what proves the implementation works.
-- Cloud Scheduler (3 jobs free) runs it; output CSV feeds the dashboard Drift page.
-- **Documented retraining trigger criteria** (PSI breach / precision-at-capacity
-  drop / 90 days). Criteria are the deliverable; automated retraining is
-  explicitly out of scope on free tier and labelled as such.
+- ~~Cloud Scheduler (3 jobs free) runs it~~ — **changed during implementation.**
+  The PSI analysis is deterministic over a fixed historical dataset, so a
+  schedule over it recomputes an identical answer forever, and its input (the
+  493MB raw CSV) is gitignored and deliberately not in the serving image. The
+  schedule watches the *deployed service* instead, as a GitHub Actions cron:
+  injected-shift suite, `/health` `/ready` `/model-info` `/metrics`, and a
+  stale-reference check. **0 of the 3 free Cloud Scheduler jobs used**; GCP.md
+  §5④ had already flagged this alternative. See MONITORING.md §6.
+- Output CSVs feed the dashboard Drift page.
+- **Documented retraining trigger criteria** (~~precision-at-capacity drop~~ —
+  see below). Criteria are the deliverable; automated retraining is explicitly
+  out of scope on free tier and labelled as such. **Precision at capacity turned
+  out not to work as a trigger**: it is bounded above by fraud_count/queue_size
+  and this model sits exactly on that bound in all 31 windows, so the number
+  tracks how much fraud occurred that day rather than how well it was ranked.
+  The trigger is **recall at capacity** instead. MONITORING.md §4.
 - Champion/challenger: document the Cloud Run revision traffic-split promotion path.
 
 **DoD:** drift job runs on schedule; injecting a shifted distribution raises the
 expected flag; Drift page reads live output.
+
+> **Outcome:** the second and third were met; the first was deliberately not,
+> because a schedule over a deterministic computation is a green checkmark and
+> no information. What runs daily instead is the detector's regression suite
+> plus a deployed-service and stale-reference check. See the Status entry and
+> MONITORING.md §6.
 
 ### Sprint 9 — Portfolio polish (Week 9, ~9h)
 
@@ -1150,7 +1168,95 @@ story.
       drill revision. Cloud Run refuses to delete the latest-created revision;
       it holds 0% traffic, cannot start, and therefore costs nothing. It becomes
       deletable after the next deploy to `main`.
-- [ ] Sprint 8 -- monitoring & drift
+- [x] Sprint 8 -- monitoring & drift (2026-09-10). `src/monitoring/drift.py`
+      (PSI detector, pure numpy) + `src/run_drift.py` (the job) + 23
+      injected-shift tests + 16 artifact tests + dashboard page 5 + a daily
+      GitHub Actions monitoring workflow + `MONITORING.md`.
+      **DoD: two of three met as written, one changed deliberately.**
+      "Injecting a shifted distribution raises the expected flag" -- met, and it
+      is the 23-test suite, not a one-off demonstration. "Drift page reads live
+      output" -- met; page 5 renders the committed CSVs and reads `/metrics`
+      live. **"Drift job runs on schedule" -- not met as written, and should not
+      be**: what runs daily is the detector's regression suite plus a deployed-
+      service and stale-reference check, because the drift analysis itself is
+      deterministic over a fixed dataset (see (a) below). Claiming a green cron
+      over an unchanging computation as monitoring would be the same error this
+      sprint's design rejected in demo-traffic PSI.
+      Three of the sprint's own planned items were changed during implementation
+      rather than shipped as written, and an end-to-end audit of the sprint
+      (2026-09-10, method in MONITORING.md §8) found three defects, all fixed
+      before commit.
+      **Measured** (2026-09-10; three runs, 2 min 15 s to 5 min 18 s end to
+      end, peak RSS 643-751MB -- the spread is the DuckDB feature fetch
+      depending on page-cache warmth, scoring is stable at 49-71 s): reference =
+      the final training fold (steps 1-355, 5,113,884 rows, 3,963 fraud);
+      comparison = 31 successive simulated days over all 6,362,620 rows, each
+      scored with `model_bundle/v1` through the serving code path.
+      Six findings:
+      (1) **The control works, which is what makes the rest readable.** Windows
+      5-13 -- nine consecutive high-volume windows inside the reference period --
+      score PSI 0.0005-0.0048 with *no* feature breaching at all. Windows
+      deliberately start at step 1 rather than after the reference cut, so the
+      detector's noise floor is measured on the data the reference was built
+      from instead of asserted. The two remaining high-volume reference windows
+      (0 and 1) breach only the two velocity features and only just, 0.29-0.43
+      against a 0.25 band: they are the busiest windows in the dataset (574,255
+      and 455,238 rows), so destination velocity runs ~3x the reference mean
+      (3.78 and 3.16 vs 1.26). The same two features breaching at *both* ends of
+      the volume range, in opposite directions, is what identifies volume rather
+      than elapsed time as the driver.
+      (2) **Feature drift and score drift come apart cleanly.** In windows 17-29
+      -- the low-volume tail, entirely outside the reference -- three to five
+      features breach 0.25 in every window while score PSI never exceeds 0.0906.
+      The model's output is insensitive to an input shift the detector is
+      correctly reporting.
+      (3) **The drift that exists is PaySim's throughput, not a payment
+      population.** `dest_txn_count_24h` (20 windows), `dest_amount_sum_24h`
+      (17) and `hour_of_day` (16) carry nearly all of it. The velocity pair
+      counts what reached a destination in the previous 24 simulated hours, so
+      they are functions of volume by construction -- and volume spans 1,070 to
+      574,255 rows across the full windows (537x). The share of rows with no
+      24-hour destination history runs 48.6% (busiest) to 99.0% (collapsed)
+      against a reference share of 58.7%; the busiest six hours hold 49.8% of
+      reference rows and 91.3% of a collapsed window's.
+      (4) **The three real score breaches sit inside the training reference.**
+      Windows 2-4 (steps 49-120) are PaySim's early collapse; window 2 is 1,070
+      rows of which 310 are fraud -- a 29.0% fraud rate against 0.047-0.068% in
+      the high-volume windows around it. A property of the generator, not
+      degradation, and it is in the data the model was trained on.
+      (5) **The undersized-window rule earned its place on the first run.**
+      Window 30 (272 rows, all fraud) scores PSI 5.57, the largest number the
+      job produces, and raises no flag. Reported and plotted, never a trigger.
+      (6) **The largest effect on the page is not drift.** At the bundle's fixed
+      threshold the queue runs 272-4,594 alerts/day against a capacity of 500,
+      exceeding it in 14 of the 30 full windows -- all high-volume, none of them
+      windows where drift fired. A score threshold fixes a score, not a queue
+      length: ARCHITECTURE §11's fold-3-specific-threshold limitation, measured
+      across the whole dataset rather than argued. Meanwhile recall at capacity
+      is 1.000 in all 31 windows and precision at capacity equals its own
+      ceiling in all 31, running 0.432-0.640 (mean 0.529) against the bundle's
+      shipped `expected_precision` of 0.5257 -- an estimate measured on fold 3
+      alone that generalises across the whole dataset.
+      **Three planned items changed on contact:**
+      (a) **Cloud Scheduler cut, 0 of 3 free jobs used.** The PSI analysis is
+      deterministic over a fixed historical dataset -- scheduling it recomputes
+      an identical answer forever -- and its input is the gitignored 493MB CSV,
+      deliberately absent from the serving image. The schedule watches the
+      deployed service instead (GitHub Actions cron: injected-shift suite,
+      `/health` `/ready` `/model-info` `/metrics`, and a **stale-reference
+      check** that fails if the served bundle no longer matches
+      `drift_reference.json`). Sprint 8 adds no GCP billing surface at all.
+      (b) **Precision at capacity is not usable as a retraining trigger.** It is
+      bounded above by fraud_count/queue_size and this model sits exactly on
+      that bound everywhere, so it reports the day's fraud count rather than the
+      model's quality. Recall at capacity replaced it.
+      (c) **Live telemetry reads `/metrics` directly** rather than waiting for
+      Sprint 10's Postgres. Per-instance and in-memory, reset by every cold
+      start -- and labelled on the page as not a drift signal, which was always
+      the point of surfacing it.
+      Also: `git_commit_hash` moved from `train_pipeline.py` to `config.py`, so
+      the drift job can stamp provenance without importing the training
+      pipeline's module-level logging and mkdir side effects.
 - [ ] Sprint 9 -- portfolio polish **(project is complete and shippable here)**
 - [x] Market-alignment review of the plan against 2026 DS hiring requirements
       (2026-08-01, not itself a sprint). Verdict: the MLOps spine is well

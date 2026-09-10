@@ -22,5 +22,10 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src/inference"]
+# src/inference is the serving path; src/monitoring is the drift detector.
+# Both are self-contained, dependency-light packages whose callers cannot see a
+# wrong type until production -- the API returns a score, the detector returns a
+# number, and neither has an obviously-wrong output. The training scripts are
+# deliberately outside this scope: they are run interactively and fail loudly.
+files = ["src/inference", "src/monitoring"]
 warn_unused_ignores = true

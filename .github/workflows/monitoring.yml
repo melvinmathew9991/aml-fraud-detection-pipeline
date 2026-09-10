@@ -1,0 +1,184 @@
+name: Monitoring
+
+# Sprint 8's scheduled job. MONITORING.md §6 records why this is a GitHub
+# Actions cron and not the Cloud Scheduler job ROADMAP.md originally planned:
+# the PSI analysis is deterministic over a fixed historical dataset, so running
+# it on a schedule would recompute an identical answer forever, and the 493MB
+# comparison dataset is gitignored and deliberately not in the serving image.
+#
+# What genuinely changes between runs is the deployed service, so that is what
+# this watches. Two failure modes it can actually catch:
+#
+#   1. The detector stops firing. tests/test_drift.py injects mean, variance and
+#      category-reweighting shifts and asserts PSI passes the threshold. A
+#      refactor that quietly broke the binning would go unnoticed otherwise --
+#      the dashboard would keep rendering a flat, reassuring line.
+#   2. The drift reference goes stale. If the deployed bundle moves and
+#      data/processed/drift_reference.json does not, every PSI number on the
+#      dashboard describes a model nobody is serving.
+#
+# INERT UNTIL CONFIGURED, the same pattern ci.yml's deploy job uses: with the
+# CLOUD_RUN_URL repository variable unset, the service probe skips and the
+# detector tests still run. A *variable*, not a secret -- the URL is public.
+#
+#   vars.CLOUD_RUN_URL   e.g. https://fraud-api-amj2cl4jhq-uc.a.run.app
+#
+# Note on GitHub's own scheduling: cron workflows run only from the default
+# branch, and GitHub disables them after 60 days without repository activity.
+# A silently-disabled schedule is a real failure mode for a monitoring job, so
+# workflow_dispatch is enabled to make a manual run trivial.
+
+on:
+  schedule:
+    # 06:17 UTC daily. Off the hour deliberately -- GitHub's shared cron queue
+    # is heavily contended on the hour and delays runs by tens of minutes.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detector:
+    name: Drift detector regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The detector is pure numpy (src/monitoring/drift.py imports nothing
+      # else), so this needs none of the training stack -- but conftest.py puts
+      # dashboard/ on sys.path and pytest collects the whole suite by default,
+      # hence naming the one file. Verified 2026-09-10 by running this exact
+      # command in a venv containing only these two packages.
+      #
+      # numpy is pinned to the version requirements-train.txt and
+      # requirements-serve.txt both pin. An unpinned dependency in a job whose
+      # purpose is to still be working in six months is a job that breaks on
+      # someone else's release. No pip cache: two packages, and keying a cache
+      # off requirements files this job does not install from would be theatre.
+      - run: pip install numpy==2.4.6 pytest==9.1.1
+      - name: injected-shift suite
+        run: pytest tests/test_drift.py -v
+
+  service:
+    name: Deployed service check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: skip notice
+        if: vars.CLOUD_RUN_URL == ''
+        run: |
+          echo "::notice::CLOUD_RUN_URL is unset -- skipping the deployed service check."
+          echo "Set the CLOUD_RUN_URL repository variable to enable it (MONITORING.md §6)." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: probe /health and /ready
+        if: vars.CLOUD_RUN_URL != ''
+        env:
+          URL: ${{ vars.CLOUD_RUN_URL }}
+        run: |
+          # Cloud Run scales to zero, so the first request of the day IS a cold
+          # start. Retry rather than reporting a sleeping service as an outage;
+          # DEPLOY.md §7.2 measured cold start at 5,311 ms after 21 minutes idle.
+          READY=""
+          for i in $(seq 1 30); do
+            READY=$(curl -sf --max-time 20 "$URL/ready" || true)
+            [ -n "$READY" ] && break
+            sleep 4
+          done
+          if [ -z "$READY" ]; then
+            echo "::error::/ready never returned 200 within ~2 minutes -- the service is down."
+            exit 1
+          fi
+          echo "$READY" | jq -e '.status == "ready"' >/dev/null \
+            || { echo "::error::/ready answered but did not report status=ready: $READY"; exit 1; }
+          curl -sf --max-time 20 "$URL/health" >/dev/null \
+            || { echo "::error::/health did not return 200"; exit 1; }
+          echo "$READY" | jq .
+
+      - name: the drift reference must describe the model actually being served
+        if: vars.CLOUD_RUN_URL != ''
+        env:
+          URL: ${{ vars.CLOUD_RUN_URL }}
+        run: |
+          curl -sf --max-time 20 "$URL/model-info" -o model-info.json \
+            || { echo "::error::/model-info did not return 200"; exit 1; }
+          # python3, not python: this job deliberately runs no setup-python
+          # (it needs only curl, jq and the standard library), and the runner
+          # image ships no unversioned `python` binary.
+          python3 - <<'PY'
+          import json
+          import sys
+
+          with open("model-info.json") as f:
+              served = json.load(f)
+          with open("data/processed/drift_reference.json") as f:
+              reference = json.load(f)
+
+          # Every field here is one the PSI numbers depend on. bundle_version and
+          # feature_version identify the model; decision_threshold sets the
+          # alert_rate / precision columns; the feature list sets which
+          # distributions were binned at all.
+          checks = [
+              ("bundle_version", served["bundle_version"], reference["bundle_version"]),
+              ("feature_version", served["feature_version"], reference["feature_version"]),
+              ("decision_threshold", served["decision_threshold"], reference["decision_threshold"]),
+              ("features", served["feature_names"], reference["features"]),
+          ]
+
+          failures = [
+              f"  {name}: deployed={live!r} but drift reference={recorded!r}"
+              for name, live, recorded in checks
+              if live != recorded
+          ]
+
+          if failures:
+              print("::error::The drift reference is stale -- it describes a different "
+                    "model than the one being served. Re-run `python tasks.py drift` "
+                    "and commit the refreshed CSVs (MONITORING.md §6).")
+              print("\n".join(failures))
+              sys.exit(1)
+
+          generated = reference["generated_at"][:10]
+          print(f"Drift reference matches the deployed bundle "
+                f"{served['bundle_version']} (generated {generated}).")
+
+          with open("summary.md", "w") as f:
+              f.write("### Drift reference\n\n")
+              f.write(f"Matches deployed bundle `{served['bundle_version']}` "
+                      f"(feature_version {served['feature_version']}, "
+                      f"generated {generated}).\n")
+          PY
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: record live telemetry
+        if: vars.CLOUD_RUN_URL != ''
+        env:
+          URL: ${{ vars.CLOUD_RUN_URL }}
+        run: |
+          # Volume, latency and flag rate -- NOT a drift signal, and labelled as
+          # such here for the same reason the dashboard labels it (ARCHITECTURE
+          # §10). /metrics is per-instance and in-memory, so a cold start means
+          # these read near zero; that is expected, not an anomaly.
+          METRICS=$(curl -sf --max-time 20 "$URL/metrics") || {
+            echo "::warning::/metrics did not answer -- telemetry not recorded this run."
+            exit 0
+          }
+          echo "$METRICS" | jq .
+          {
+            echo "### Live telemetry (this instance, since its last cold start)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "$METRICS" | jq -r '"| Requests | \(.request_count) |",
+                                     "| Scored | \(.score_count) |",
+                                     "| Flagged | \(.flagged_count) |",
+                                     "| Flag rate | \(.flag_rate) |",
+                                     "| p95 latency | \(.latency_p95_ms) ms |"'
+            echo ""
+            echo "Not a drift signal — per-instance, in-memory, and reset by every"
+            echo "cold start. See MONITORING.md §1."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -61,7 +61,7 @@ the difference is immaterial — but it is recorded rather than papered over.
 | Sprint | Adds | Billing surface |
 |---|---|---|
 | 7 — Deployment | Cloud Run, Artifact Registry, Workload Identity Federation | GCP, free tier |
-| 8 — Monitoring & drift | Cloud Scheduler (1 of 3 free jobs), Cloud Logging, Cloud Monitoring | GCP, free tier |
+| 8 — Monitoring & drift | **Nothing.** The drift job runs offline and the scheduled check is a GitHub Actions cron (§5④) | none |
 | 9 — Portfolio polish | Documentation only | none |
 | 10 — Persistence & auth | Neon Postgres, API-key auth | **not GCP** |
 | 11 — Graph & statistics | Local compute | none |
@@ -152,10 +152,21 @@ portfolio demo.
 
 See §6. Enforced at repository creation, not retrofitted, and watched by CI.
 
-### ④ Keep the drift job within Cloud Scheduler's 3 free jobs
+### ④ ~~Keep the drift job within Cloud Scheduler's 3 free jobs~~ — **resolved, 0 used**
 
-Sprint 8 needs one. Alternatively move it to a GitHub Actions cron schedule,
-which is free for public repositories and removes the GCP dependency entirely.
+This anticipated the alternative and Sprint 8 took it: the scheduled check is a
+GitHub Actions cron (free on public repositories), and **no Cloud Scheduler job
+was created**. All 3 remain available.
+
+The reason is not cost, it is that the scheduled thing changed. The PSI analysis
+is deterministic over a fixed historical dataset, so scheduling it would
+recompute an identical answer forever — and its input is the 493 MB raw dataset,
+gitignored and deliberately absent from the serving image, so a cloud job could
+not read it without adding Cloud Storage and a Cloud Run job for an answer that
+never moves. What the schedule watches instead is the *deployed service*, which
+does change. `MONITORING.md` §6 has the full reasoning.
+
+**Sprint 8 adds no GCP billing surface at all.**
 
 ---
 

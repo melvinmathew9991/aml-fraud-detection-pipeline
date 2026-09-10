@@ -426,6 +426,70 @@ space as fraud, just at lower magnitude. Since there are no misses to
 recover at this capacity, the lever is the threshold and the queue size, not
 more features.
 
+### Drift: the inputs move, the score mostly does not, and the queue moves most (Sprint 8)
+
+PSI over the dataset's own 743 simulated hours — reference = the final training
+fold (steps 1–355, 5,113,884 rows), comparison = each successive simulated day,
+all 6,362,620 rows scored with the deployed bundle. Full write-up in
+`MONITORING.md`; the dashboard's Drift page renders it.
+
+**The control comes first.** Windows 5–13 — nine consecutive high-volume windows
+*inside* the reference period — score PSI 0.0005–0.0048 with no feature breaching
+at all. Windows start at step 1 rather than after the reference cut precisely so
+the noise floor is measured rather than asserted: without it, a flat line
+elsewhere would be indistinguishable from a detector that never fires. The two
+remaining high-volume reference windows (0 and 1) breach only the two velocity
+features and only just, 0.29–0.43 against a 0.25 band — they are the busiest
+windows in the dataset, so destination velocity runs about three times the
+reference mean. That the same two features breach at *both* ends of the volume
+range, in opposite directions, is what identifies volume rather than elapsed time
+as the driver.
+
+That floor is an *in-sample* one: the reference scores come from scoring the
+training fold with a model fitted on it. Windows 14–16 — high-volume and just
+past the reference cut — measure the size of that bias at 2.8x (mean 0.0075
+against 0.0027), which changes no conclusion here but is the number to quote.
+
+**What drifts is PaySim's throughput.** `dest_txn_count_24h` (20 of 31 windows),
+`dest_amount_sum_24h` (17) and `hour_of_day` (16) carry nearly all of it. The
+velocity pair counts what reached a destination in the previous 24 simulated
+hours, so they are functions of volume by construction — and volume spans 1,070
+to 574,255 rows across the full windows, a factor of 537. The share of rows with
+no 24-hour destination history runs 48.6% in the busiest window to 99.0% in a
+collapsed one, against a reference share of 58.7%. `hour_of_day` follows for the
+same reason: the busiest six hours hold 49.8% of reference rows and 91.3% of a
+collapsed window's.
+
+**Feature drift and score drift are different questions, and this data separates
+them.** Across windows 17–29 — the low-volume tail, entirely outside the
+reference — three to five features breach 0.25 in *every* window while score PSI
+never exceeds 0.0906, under its 0.10 band. The model's output is insensitive to
+an input shift the detector is correctly reporting.
+
+**The model is not degrading anywhere.** Recall at capacity is 1.000 in all 31
+windows and precision at capacity sits exactly on its own ceiling in all 31,
+running 0.432–0.640 (mean 0.529) against the bundle's shipped
+`expected_precision` of 0.5257 — which was measured on fold 3 alone and turns out
+to generalise across the whole dataset.
+
+**The biggest effect isn't drift at all.** At the bundle's fixed decision
+threshold the review queue runs **272 to 4,594 alerts/day** against a configured
+capacity of 500, exceeding it in **14 of the 30 full windows** — every one of them
+high-volume, none of them a window where drift fired. A score threshold fixes a
+score, not a queue length. This is the fold-3-specific threshold that the model
+card already lists as a limitation, now measured across 6.36M rows instead of
+argued.
+
+Two smaller results worth keeping. The three genuine score-PSI breaches (windows
+2–4, steps 49–120) are PaySim's early collapse — one window is 1,070 rows of
+which 310 are fraud, a 29.0% fraud rate against 0.047–0.068% around it — and they sit
+*inside* the training reference, so they are a property of the generator rather
+than degradation. And the undersized-window rule paid for itself on the first
+run: window 30 is 272 rows, all fraud, and scores PSI 5.57, the largest number
+the job produces. It is reported, plotted, and raises no flag, because 272 rows
+cannot support a distributional claim.
+
+
 ## Project structure
 
 ```
@@ -444,7 +508,10 @@ fraud-detection-project/
 │       ├── error_analysis_profile.csv          # TP/FP/FN feature profile of the review queue
 │       ├── missed_fraud_summary.csv            # where missed fraud sits in the ranking
 │       ├── feature_ablation.csv                # metric movement attributed per feature group
-│       └── capacity_economics.csv              # net value per capacity level (src/economics.py)
+│       ├── capacity_economics.csv              # net value per capacity level (src/economics.py)
+│       ├── drift_feature_psi.csv               # PSI per (window, feature) over dataset time
+│       ├── drift_score_psi.csv                 # per-window score PSI + operating point
+│       └── drift_reference.json                # what the drift reference was (staleness contract)
 ├── models/                     # trained model artifacts per run (not committed)
 │   └── <run_id>/                 scaler + one .joblib per model (final CV fold) + metadata.json
 ├── mlflow.db                   # local MLflow tracking store (not committed)
@@ -463,6 +530,9 @@ fraud-detection-project/
 │   ├── export_bundle.py         # emits the versioned model_bundle/ serving artifact
 │   ├── build_dest_state.py      # emits dest_state.parquet, the serving-time feature snapshot
 │   ├── train_pipeline.py       # main training + CV + Optuna tuning + MLflow pipeline
+│   ├── run_drift.py             # Sprint 8: the drift job -- PSI over dataset time
+│   ├── monitoring/              # Sprint 8: the detector, pure numpy
+│   │   └── drift.py              # PSI, binning strategy, thresholds and bands
 │   ├── inference/               # Sprint 4: the only code path from raw txn to score
 │   │   ├── bundle.py             # load + sha256-verify a model_bundle/vN/
 │   │   ├── state.py              # destination-state lookup (hashed searchsorted)
@@ -478,10 +548,11 @@ fraud-detection-project/
 │       ├── limits.py             # request body size cap
 │       ├── metrics.py            # in-memory counters backing /metrics
 │       └── audit.py              # structured JSON prediction audit log
-├── tests/                      # pytest suite, 182 tests: features/metrics/threshold/cv/schema/
+├── tests/                      # pytest suite, 231 tests: features/metrics/threshold/cv/schema/
 │                                #   economics/bundle/golden-file/train-determinism/error-analysis/
 │                                #   explain (Sprints 0-3), inference unit + skew (plumbing & state)
-│                                #   + API contract (Sprint 4)
+│                                #   + API contract (Sprint 4), dashboard (Sprints 5-7),
+│                                #   drift detector + committed-artifact checks (Sprint 8)
 ├── model_bundle/v1/             # committed, versioned serving artifact (see ARCHITECTURE.md §3)
 ├── config.yaml                 # paths, CV, model, Optuna, and MLflow config
 ├── requirements-train.txt       # laptop / CI training environment (also runs the API's tests)
@@ -498,6 +569,8 @@ fraud-detection-project/
 ├── GIT_WORKFLOW.md             # branch, commit and branch-protection policy
 ├── AUDIT.md                    # pre-deployment audit, defect register, full commit history
 ├── GCP.md                      # GCP free-tier analysis, cost model, deploy checklist
+├── DEPLOY.md                   # Cloud Run deployment runbook, every command and its output
+├── MONITORING.md               # drift results, retraining criteria, champion/challenger
 └── README.md
 ```
 
@@ -523,9 +596,13 @@ rejected — it touches every import, the Dockerfile, CI and the `uvicorn`
 target, which is not a change to make immediately before a first deployment.
 
 Documentation lives at the repo root rather than in `docs/` on purpose: the
-four documents are cross-referenced **121 times** by section number
-(`ARCHITECTURE.md §3`, `ROADMAP.md` Sprint 6, …), and moving them buys nothing
-that offsets rewriting every reference.
+eight documents are cross-referenced **103 times** by section or sprint number
+(`ARCHITECTURE.md §3`, `ROADMAP.md` Sprint 6, …) from prose, source and CI
+config alike, and moving them buys nothing that offsets rewriting every
+reference. (Counted 2026-09-10 across the docs, `src/`, `dashboard/`, `tests/`,
+both workflows and `tasks.py`; the figure was four documents and 121 references
+when first written, on a narrower measure and before `DEPLOY.md` and
+`MONITORING.md` existed.)
 
 ## Running it
 
@@ -542,7 +619,18 @@ python tasks.py                # list every task
 python tasks.py check          # ruff -> mypy -> pytest, in CI's order
 python tasks.py api            # uvicorn on :8000 with reload
 python tasks.py dashboard      # streamlit
+python tasks.py drift          # recompute the PSI series over dataset time
 ```
+
+`drift` reads the feature table the training pipeline materializes, scores all
+6,362,620 rows through the deployed bundle and writes the three committed
+artifacts the dashboard's Drift page reads. Measured across three runs: **2 min
+15 s to 5 min 18 s, peak RSS 643–751 MB** — the spread is the DuckDB feature
+fetch (44 s to 4 min, depending on whether the 796 MB store is warm in the page
+cache); scoring is stable at 49–71 s. It does not rebuild features — that is
+the training pipeline's job, and a second place interpreting `FEATURE_VERSION`
+is a second place for it to go stale, so the job exits with instructions if the
+table is missing or was built at a different version. See `MONITORING.md`.
 
 `check` mirrors the CI PR gate deliberately: if it passes locally the gate
 should pass, so failures surface before a ~3-minute round-trip rather than
@@ -709,8 +797,14 @@ in the untouched Sprint 0-2 modules, closed the one real gap it did find
 modules without dedicated tests), and fixed a few small drift risks
 (a hardcoded value duplicated instead of shared with its own constant, a
 swallowed exception with no log line, three CSVs generated but never
-logged to MLflow). The `pytest` suite stands at **174 tests** as of
-2026-08-03, all passing, and runs in CI on every pull request. The
-Streamlit dashboard (Sprint 5) and containerization/CI (Sprint 6) have
-since shipped; next is cloud deployment (Sprint 7), followed by drift
-monitoring and portfolio polish.
+logged to MLflow). The `pytest` suite stands at **231 tests** as of
+2026-09-10, all passing, and runs in CI on every pull request.
+
+**Sprints 5 through 8 have since shipped**: the Streamlit dashboard, the
+container and CI gate, the Cloud Run deployment (live, with a verified budget
+alert, a measured 5,311 ms cold start and a rollback drill — `DEPLOY.md`), and
+drift monitoring (PSI over dataset time, injected-shift detector tests,
+documented retraining criteria and a champion/challenger path — `MONITORING.md`).
+Next is Sprint 9, portfolio polish, at which point the roadmap marks the project
+complete and shippable; Sprints 10–12 (persistence/auth, graph analytics and
+significance testing, GenAI narratives) close gaps a current JD would flag.

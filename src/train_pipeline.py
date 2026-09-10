@@ -46,7 +46,6 @@ End-to-end training pipeline demonstrating:
 
 import json
 import logging
-import subprocess
 from datetime import UTC, datetime
 
 import duckdb
@@ -62,7 +61,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from config import PROJECT_ROOT, load_config, resolve_tracking_uri
+from config import PROJECT_ROOT, git_commit_hash, load_config, resolve_tracking_uri
 from custom_metrics import (
     precision_at_k,
     recall_at_k,
@@ -126,22 +125,6 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("train_pipeline")
-
-
-def git_commit_hash() -> str:
-    try:
-        commit = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=PROJECT_ROOT, stderr=subprocess.DEVNULL,
-        ).decode().strip()
-        dirty = bool(subprocess.check_output(
-            ["git", "status", "--porcelain"],
-            cwd=PROJECT_ROOT, stderr=subprocess.DEVNULL,
-        ).strip())
-        return f"{commit}-dirty" if dirty else commit
-    except Exception as exc:  # noqa: BLE001 -- best-effort provenance lookup, must never fail the run
-        logger.debug("git_commit_hash: falling back to 'nogit' (%s)", exc)
-        return "nogit"
 
 
 def log_memory(stage: str) -> None:

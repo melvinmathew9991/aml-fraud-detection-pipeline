@@ -51,3 +51,11 @@ Thumbs.db
 
 # Claude Code local state
 .claude/
+
+# Working project report -- a synthesis written for an external reader
+# (recruiters, interviewers), rewritten wholesale per revision. Deliberately
+# untracked: it restates status from ROADMAP.md, defects from AUDIT.md and
+# results from README.md, and a fourth copy of those facts is a fourth place
+# for them to go stale -- this repo's single recurring defect. Ignored rather
+# than merely untracked so a `git add -A` cannot sweep it in.
+REPORT.md

@@ -565,18 +565,55 @@ The real analysis uses the data that exists. PaySim spans 743 hourly steps, so:
   shift, category re-weighting) assert the detector fires. That is what proves
   the implementation, not the demo traffic.
 
-Live scored traffic is still logged to Postgres and surfaced, but as **volume and
-score-distribution telemetry**, not as a drift signal — the sample is too small
-and the distinction is stated on the dashboard rather than blurred.
-- **Retraining trigger**: documented criteria (PSI breach, precision-at-capacity
-  drop, or 90 days elapsed). The *criteria* are the deliverable; automated
-  retraining is out of scope on free tier and is stated as such rather than
-  faked.
-- **Cloud Scheduler** free tier (3 jobs/month) runs the drift job; results land
-  in a CSV the dashboard reads.
+Live scored traffic is still surfaced, but as **volume and score-distribution
+telemetry**, not as a drift signal — the sample is too small and the distinction
+is stated on the dashboard rather than blurred. (Until Sprint 10's database it
+is read live from `/metrics` and is per-instance and in-memory, which the page
+also says.)
+- **Retraining trigger**: documented criteria. The *criteria* are the
+  deliverable; automated retraining is out of scope on free tier and is stated
+  as such rather than faked.
 - **Champion/challenger**: `/model-info` exposes `bundle_version`, and the
   deploy flow supports Cloud Run revision traffic splitting, so a challenger can
   take 10% before promotion.
+
+### Built in Sprint 8 — three things the plan got wrong
+
+`MONITORING.md` is the runbook, the measured results and the retraining
+criteria. Three points where implementation changed the design are worth
+recording here, since this section is what they contradict.
+
+**1. The scheduled job does not run the drift analysis.** The plan had Cloud
+Scheduler (1 of 3 free jobs) running the PSI job. But the analysis is
+deterministic over a fixed historical dataset — re-running it returns a
+byte-identical answer forever — and its input is the 493MB raw dataset, which is
+gitignored and deliberately not in the 172.7MB serving image. A schedule over
+that computation is the same category of error as PSI over demo traffic, which
+this section already rejected. What changes between runs is the *deployed
+service*, so `.github/workflows/monitoring.yml` watches that instead: it re-runs
+the injected-shift suite, probes `/health` `/ready` `/model-info` `/metrics`, and
+fails if the served `bundle_version` / `feature_version` / `decision_threshold` /
+feature list no longer match `drift_reference.json` — a stale reference means
+every PSI number on the dashboard describes a model nobody serves. Sprint 8
+therefore consumes **0 of the 3 free Cloud Scheduler jobs** (`GCP.md` §5④ had
+already flagged the GitHub Actions alternative).
+
+**2. Precision at capacity turned out not to be usable as a trigger.** It is
+bounded above by `fraud_count / queue_size`, and the shipped model sits exactly
+on that bound in all 31 windows — so the number reports how much fraud occurred
+that day, not how well it was ranked. The trigger is **recall at capacity**
+instead: whether fraud is still landing inside the queue analysts can work. It is
+1.000 in every window today.
+
+**3. Feature drift and score drift came apart, and the larger finding was
+neither.** Three features breach (both destination-velocity features and
+`hour_of_day`) in the low-volume windows while score PSI stays under 0.10
+throughout them — the model's output is insensitive to an input shift the
+detector correctly reports, and the shift is PaySim's own throughput varying
+537x. The effect that actually dominates is operational: at the bundle's fixed
+threshold the queue runs 272–4,594 alerts/day against a capacity of 500,
+exceeding it in 14 of 30 full windows. A score threshold fixes a score, not a
+queue length — which is §11's fold-3-specific-threshold limitation, now measured.
 
 ---
 
