@@ -23,7 +23,7 @@ from inference.bundle import load_bundle
 from inference.score import score_batch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v1"
+BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v2"
 GOLDEN_PATH = PROJECT_ROOT / "tests" / "golden" / "golden_transactions.csv"
 
 

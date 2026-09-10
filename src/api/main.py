@@ -6,7 +6,7 @@ transaction to score is `inference/` -- this module is a thin HTTP shell
 around it: parse, call inference.rules/score, log, respond. No feature
 logic lives here.
 
-Run locally with the bundle already committed at model_bundle/v1/:
+Run locally with the bundle already committed at model_bundle/v2/:
 
     uvicorn api.main:app --app-dir src --reload
 
@@ -66,7 +66,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("api")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v1"
+DEFAULT_BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v2"
 REASONS_PER_ALERT = 4
 
 

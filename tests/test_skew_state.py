@@ -1,6 +1,6 @@
 """
 Skew test -- state (ARCHITECTURE.md §7): for a sample of real destinations,
-asserts inference/state.py's lookup against the COMMITTED dest_state.parquet
+asserts inference/state.py's lookup against the COMMITTED dest_state.npz
 matches a query computed directly and independently against the live
 DuckDB table, at that table's current max(step).
 
@@ -11,7 +11,7 @@ stale committed snapshot) disagrees with what the source table actually
 contains, not a model/scaler bug.
 
 Coupled to the local DuckDB store matching the table the committed
-model_bundle/v1/dest_state.parquet was built from -- if the store has been
+model_bundle/v2/dest_state.npz was built from -- if the store has been
 regenerated or grown since, this test's independent recomputation will
 (correctly) stop agreeing with the frozen snapshot and should be re-run
 after `build_dest_state.py` + `export_bundle.py` regenerate the bundle.
@@ -26,14 +26,14 @@ import pytest
 from config import PROJECT_ROOT, load_config
 from inference.state import load_dest_state
 
-BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v1"
+BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v2"
 VELOCITY_WINDOW_HOURS = 24
 SAMPLE_SIZE = 30
 
 
 def _require_bundle():
-    if not (BUNDLE_DIR / "dest_state.parquet").exists():
-        pytest.skip("model_bundle/v1/dest_state.parquet not generated yet.")
+    if not (BUNDLE_DIR / "dest_state.npz").exists():
+        pytest.skip("model_bundle/v2/dest_state.npz not generated yet.")
 
 
 def _require_duckdb_store():
@@ -48,7 +48,7 @@ def test_state_lookup_matches_independent_duckdb_query():
     _require_bundle()
     db_path = _require_duckdb_store()
 
-    ds = load_dest_state(BUNDLE_DIR / "dest_state.parquet")
+    ds = load_dest_state(BUNDLE_DIR / "dest_state.npz")
 
     con = duckdb.connect(str(db_path), read_only=True)
     try:
@@ -97,7 +97,7 @@ def test_state_lookup_merchant_destinations_are_cold_start():
     _require_bundle()
     db_path = _require_duckdb_store()
 
-    ds = load_dest_state(BUNDLE_DIR / "dest_state.parquet")
+    ds = load_dest_state(BUNDLE_DIR / "dest_state.npz")
 
     con = duckdb.connect(str(db_path), read_only=True)
     try:

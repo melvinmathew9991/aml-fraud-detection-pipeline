@@ -148,5 +148,5 @@ def load_bundle(bundle_dir: Path) -> Bundle:
         booster=booster,
         scaler=scaler,
         threshold=threshold,
-        dest_state_path=bundle_dir / "dest_state.parquet",
+        dest_state_path=bundle_dir / "dest_state.npz",
     )

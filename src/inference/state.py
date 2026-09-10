@@ -7,7 +7,7 @@ aggregates over destination account history, computed at training time as
 SQL window functions over the full raw table. A single incoming transaction
 at serving time has no window to look back through, so this module answers
 "what does this destination's history look like as of the bundled
-snapshot?" from the committed `dest_state.parquet`.
+snapshot?" from the committed `dest_state.npz`.
 
 Per ARCHITECTURE.md §2's "In-memory representation" section: the parquet is
 NOT loaded into a dict or a DataFrame (571,961 Python dict entries would
@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import pyarrow.parquet as pq
 
 # Cold-start / unknown-destination values, shared by features.py.
 COLD_START = {
@@ -58,8 +57,18 @@ def _hash_dest(name_dest: str) -> np.uint64:
     return np.uint64(int.from_bytes(digest, byteorder="big"))
 
 
-def _hash_many(names) -> np.ndarray:
+def hash_many(names) -> np.ndarray:
+    """Hash a sequence of destination ids.
+
+    Public because `build_dest_state.py` imports it. The snapshot now ships
+    precomputed keys rather than account names, so the build and the lookup must
+    agree on the hash exactly -- sharing the function is what guarantees that,
+    instead of two implementations that merely look alike.
+    """
     return np.array([_hash_dest(n) for n in names], dtype="uint64")
+
+
+_hash_many = hash_many  # retained: existing tests import the private name
 
 
 @dataclass(frozen=True)
@@ -122,41 +131,48 @@ class DestState:
 SNAPSHOT_STEP_METADATA_KEY = b"snapshot_step"  # written by build_dest_state.py
 
 
-def load_dest_state(parquet_path: Path) -> DestState:
-    table = pq.read_table(
-        parquet_path,
-        columns=["name_dest", "prior_txn_count", "prior_avg_amount",
-                 "txn_count_24h", "amount_sum_24h"],
-    )
-    file_metadata = table.schema.metadata or {}
-    raw_snapshot_step = file_metadata.get(SNAPSHOT_STEP_METADATA_KEY)
-    snapshot_step = int(raw_snapshot_step) if raw_snapshot_step is not None else None
+def load_dest_state(state_path: Path) -> DestState:
+    """Load the snapshot from the bundle's `dest_state.npz`.
 
-    names = table.column("name_dest").to_pylist()
-    count = table.column("prior_txn_count").to_numpy(zero_copy_only=False).astype("int32")
-    avg = table.column("prior_avg_amount").to_numpy(zero_copy_only=False).astype("float32")
-    c24 = table.column("txn_count_24h").to_numpy(zero_copy_only=False).astype("int32")
-    s24 = table.column("amount_sum_24h").to_numpy(zero_copy_only=False).astype("float32")
+    The arrays are stored ready to use: keys already hashed, already sorted, and
+    the account names not stored at all -- `DestState` never keeps them, so
+    shipping 571,961 strings only to hash and discard them was work the build
+    could do once instead of every cold start.
 
-    keys = _hash_many(names)
-    order = np.argsort(keys, kind="stable")
-    keys = keys[order]
+    Measured on the previous parquet format, that work was **2,268 ms** of the
+    startup path (627 ms parquet parse, 556 ms materialising the strings,
+    1,016 ms hashing them, 68 ms sorting). Reading the arrays back is ~100 ms,
+    and dropping the format also dropped `pyarrow` -- 84.3 MB of the 133.6 MB
+    serving dependency footprint, for this one call. See ARCHITECTURE.md §3.
 
-    dup = keys[:-1] == keys[1:]
-    if dup.any():
-        collided_at = int(np.flatnonzero(dup)[0])
+    The collision check moved to build time with the hashing, which is where it
+    always belonged: a bundle that could serve one destination's history under
+    another's name should never be written, not merely refused on load.
+    """
+    with np.load(state_path) as payload:
+        keys = payload["keys"].astype("uint64", copy=False)
+        count = payload["count"].astype("int32", copy=False)
+        avg = payload["avg"].astype("float32", copy=False)
+        c24 = payload["c24"].astype("int32", copy=False)
+        s24 = payload["s24"].astype("float32", copy=False)
+        stored_step = payload["snapshot_step"]
+        snapshot_step = None if stored_step.size == 0 else int(stored_step.reshape(-1)[0])
+
+    # Cheap invariant, not a re-derivation: the lookup is a searchsorted over
+    # `keys` and silently returns wrong answers if the build ever emits them
+    # unsorted. O(n) to check against O(n log n) to redo.
+    if keys.size > 1 and not np.all(keys[:-1] < keys[1:]):
         raise DestStateCollisionError(
-            f"64-bit hash collision at sorted index {collided_at} while loading "
-            f"{parquet_path} -- two distinct name_dest values hash to the same "
-            "key. Refusing to load a state snapshot that could serve the wrong "
-            "destination's history."
+            f"{state_path} -- keys are not strictly increasing, so they are "
+            "either unsorted or contain a duplicate. Refusing to load a state "
+            "snapshot whose lookups would be undefined."
         )
 
     return DestState(
         keys=keys,
-        count=count[order],
-        avg=avg[order],
-        c24=c24[order],
-        s24=s24[order],
+        count=count,
+        avg=avg,
+        c24=c24,
+        s24=s24,
         snapshot_step=snapshot_step,
     )

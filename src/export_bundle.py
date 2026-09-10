@@ -14,14 +14,14 @@ silent deserialization risk in production. Instead:
                     scipy pull-in) from the serving image entirely
   threshold.json    the deployable decision rule -- score >= threshold means
                     "flag it" -- plus the operating point it was measured at
-  dest_state.parquet  built separately by build_dest_state.py; this script
+  dest_state.npz      built separately by build_dest_state.py; this script
                     only reads it to include in the checksum manifest
   bundle_meta.json  bundle/feature version, git commit, run id, and a
                     per-file sha256 the API verifies at startup before
                     serving a tampered or partial bundle
 
 Run `build_dest_state.py` before this script -- it will refuse to produce a
-bundle_meta.json missing dest_state.parquet's checksum rather than silently
+bundle_meta.json missing dest_state.npz's checksum rather than silently
 omitting it.
 """
 
@@ -39,7 +39,12 @@ from config import PROJECT_ROOT
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("export_bundle")
 
-BUNDLE_VERSION = "v1"
+# v2 (2026-09-10): dest_state moved from parquet to .npz with precomputed,
+# pre-sorted hash keys. Same model, same scaler, same threshold -- this
+# version tracks the ARTIFACT, while the model identity stays in run_id /
+# trained_at / git_commit. The change dropped pyarrow (84.3 MB of a 133.6 MB
+# serving dependency footprint) and 2,268 ms of cold-start work.
+BUNDLE_VERSION = "v2"
 
 
 def _latest_run_dir(model_dir: Path) -> Path:
@@ -76,7 +81,7 @@ def export_scaler(scaler, feature_names: list[str], out_path: Path) -> None:
     # build_bundle, in binary mode) depend on which OS built the bundle.
     # Forcing LF here means bundle_meta.json's sha256 is stable regardless
     # of platform, matching model.txt (LightGBM's own writer already emits
-    # LF) and dest_state.parquet (binary, no newline concept).
+    # LF) and dest_state.npz (binary, no newline concept).
     with open(out_path, "w", newline="\n") as f:
         json.dump(payload, f, indent=2)
 
@@ -185,7 +190,7 @@ def main():
     parser.add_argument("--output-dir", type=Path,
                          default=PROJECT_ROOT / "model_bundle" / BUNDLE_VERSION)
     parser.add_argument("--dest-state", type=Path,
-                         default=PROJECT_ROOT / "model_bundle" / BUNDLE_VERSION / "dest_state.parquet")
+                         default=PROJECT_ROOT / "model_bundle" / BUNDLE_VERSION / "dest_state.npz")
     args = parser.parse_args()
 
     model_dir = PROJECT_ROOT / "models"

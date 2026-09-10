@@ -260,10 +260,35 @@ model_bundle/
   threshold.json     {"decision_threshold": ..., "reviews_per_day": 500,
                       "fold": 3, "expected_precision": ..., "expected_recall": ...,
                       "precision_ceiling": ...}
-  dest_state.parquet per-destination state snapshot (section 2)
+  dest_state.npz     per-destination state snapshot (section 2), as
+                     precomputed sorted hash keys + four arrays
   bundle_meta.json   {"bundle_version", "feature_version", "git_commit",
                       "run_id", "model_name", "trained_at", "sha256": {...}}
 ```
+
+**`dest_state` is `.npz`, not parquet, and ships keys rather than names (v2,
+2026-09-10).** Serving never needs an account name -- `DestState` keeps only the
+64-bit hashes it looks up by -- so the parquet was shipping 571,961 strings that
+every cold start parsed and hashed and then discarded. Measured: 2,268 ms of
+startup work (627 ms parquet parse, 556 ms materialising the strings, 1,016 ms
+hashing them, 68 ms sorting) against ~100 ms to read the arrays back. It also
+carried `pyarrow` into the serving image for that one call -- **84.3 MB of a
+133.6 MB dependency footprint**, plus ~600 ms of import time -- and the file is
+now smaller too (6.57 MB against 7.48 MB).
+
+The hash and the collision check moved to `build_dest_state.py`, which is where
+they belong: a bundle that could serve one destination's history under another's
+name should never be *written*, not merely refused on load. `build_dest_state.py`
+imports `hash_many` from `inference/state.py` rather than reimplementing it, so
+the build and the lookup cannot drift apart. The loader still verifies the keys
+it was handed are strictly increasing, because the lookup is a `searchsorted`
+that returns wrong answers rather than failing on unsorted input.
+
+v2 is a **packaging** bump: same model, same scaler, same threshold, same
+`run_id`. `bundle_version` identifies the artifact; the model identity lives in
+`run_id` / `trained_at` / `git_commit`. v2's arrays were converted from v1's
+parquet rather than rebuilt, so every value is v1's -- verified element-wise, and
+the drift job's output over 6.36M rows is byte-identical.
 
 Consequences, all deliberate:
 
