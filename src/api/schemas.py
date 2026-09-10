@@ -92,6 +92,24 @@ class ModelInfoResponse(BaseModel):
     limitations: list[str]
 
 
+class IndexResponse(BaseModel):
+    """The landing payload for `GET /`.
+
+    Exists because the service had no root route at all, so every visitor who
+    opened the public URL got a bare 404 -- which was 100% of the deployment's
+    4xx rate (17 of 103 requests over 30 days, all `/` or `/favicon.ico`). A
+    public URL that answers nothing at its root is a broken front door, and the
+    interactive Swagger UI that makes this API demonstrable was sitting one
+    undiscoverable path away.
+    """
+
+    service: str
+    version: str
+    bundle_version: str | None = None
+    docs: str
+    endpoints: list[str]
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
 

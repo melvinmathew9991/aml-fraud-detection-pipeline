@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v1"
+BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v2"
 GOLDEN_PATH = PROJECT_ROOT / "tests" / "golden" / "golden_transactions.csv"
 
 

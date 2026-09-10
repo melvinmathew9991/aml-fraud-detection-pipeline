@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-09-10T07:30:31.497522+00:00",
-  "run_id": "20260910T072817Z",
-  "git_commit": "926e1d5-dirty",
-  "bundle_version": "v1",
+  "generated_at": "2026-09-10T11:00:25.559307+00:00",
+  "run_id": "20260910T105826Z",
+  "git_commit": "6b4abc5-dirty",
+  "bundle_version": "v2",
   "feature_version": 3,
   "model_name": "LightGBM (tuned)",
   "decision_threshold": 8.077004481140283e-06,

@@ -30,7 +30,7 @@ MODEL_LIMITATIONS = [
 # The dashboard's Model card page is static (ARCHITECTURE.md §6: pages 3-5
 # render with no API call), so it cannot read this live off a running
 # bundle the way /model-info does. Mirrors the currently committed
-# model_bundle/v1/dest_state.parquet's embedded snapshot_step metadata
+# model_bundle/v2/dest_state.npz's embedded snapshot_step array
 # (verified via /model-info against the live bundle, not just asserted
 # here) -- update this if the bundle is ever rebuilt against a different
 # snapshot.

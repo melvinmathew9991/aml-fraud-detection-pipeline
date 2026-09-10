@@ -6,7 +6,7 @@ transaction to score is `inference/` -- this module is a thin HTTP shell
 around it: parse, call inference.rules/score, log, respond. No feature
 logic lives here.
 
-Run locally with the bundle already committed at model_bundle/v1/:
+Run locally with the bundle already committed at model_bundle/v2/:
 
     uvicorn api.main:app --app-dir src --reload
 
@@ -53,6 +53,7 @@ from .schemas import (
     BatchResponse,
     BatchSummary,
     HealthResponse,
+    IndexResponse,
     MetricsResponse,
     ModelInfoResponse,
     ReadyResponse,
@@ -65,7 +66,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("api")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v1"
+DEFAULT_BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v2"
 REASONS_PER_ALERT = 4
 
 
@@ -121,6 +122,29 @@ def _score_response(request_id: str, decision, probability: float, flagged: bool
 
 
 router = APIRouter()
+
+API_VERSION = "1.0.0"
+
+
+@router.get("/", response_model=IndexResponse)
+async def index(request: Request) -> IndexResponse:
+    """A landing point for the public URL.
+
+    Deliberately cheap and deliberately not gated on readiness: this is the
+    first thing a human sees, and answering "the service is here, the docs are
+    there" while the bundle is still loading is more useful than a 503. The
+    bundle version is reported when it is known and omitted when it is not.
+    """
+    service = getattr(request.app.state, "service", None)
+    bundle = getattr(service, "bundle", None) if service else None
+    return IndexResponse(
+        service="AML Fraud Detection API",
+        version=API_VERSION,
+        bundle_version=bundle.bundle_version if bundle else None,
+        docs="/docs",
+        endpoints=["/health", "/ready", "/model-info", "/score", "/score/batch",
+                   "/metrics", "/docs", "/openapi.json"],
+    )
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -286,7 +310,7 @@ def create_app(bundle_dir: Path = DEFAULT_BUNDLE_DIR,
         app.state.service = load_service_state(bundle_dir)
         yield
 
-    app = FastAPI(title="AML Fraud Detection API", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="AML Fraud Detection API", version=API_VERSION, lifespan=lifespan)
     register_exception_handlers(app)
     app.add_middleware(RateLimitMiddleware, max_requests=rate_limit_max_requests,
                         window_seconds=rate_limit_window_seconds)

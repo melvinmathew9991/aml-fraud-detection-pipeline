@@ -31,10 +31,10 @@ import sys
 from pathlib import Path
 
 import duckdb
-import pyarrow as pa
-import pyarrow.parquet as pq
+import numpy as np
 
 from config import PROJECT_ROOT, load_config
+from inference.state import DestStateCollisionError, hash_many
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("build_dest_state")
@@ -42,14 +42,11 @@ logger = logging.getLogger("build_dest_state")
 VELOCITY_WINDOW_HOURS = 24  # matches features.VELOCITY_WINDOW_HOURS
 MAX_BUNDLE_SIZE_MB = 20  # Sprint 3 DoD ceiling
 
-# Embedded as parquet file-level metadata rather than a separate sidecar
-# file, so the snapshot's own artifact is the single source of truth for
-# when it was taken -- ARCHITECTURE.md §5 requires /model-info to report
-# this ("snapshot as-of step"). inference/state.py reads the same key; kept
-# in sync by convention (a hardcoded string in both, not a shared import --
-# state.py cannot depend on this training-only module, which pulls in
-# duckdb).
-SNAPSHOT_STEP_METADATA_KEY = b"snapshot_step"
+# Stored as an array inside the .npz rather than a sidecar file, so the
+# snapshot's own artifact remains the single source of truth for when it was
+# taken -- ARCHITECTURE.md §5 requires /model-info to report this ("snapshot
+# as-of step").
+SNAPSHOT_STEP_KEY = "snapshot_step"
 
 
 def build_dest_state(con: duckdb.DuckDBPyConnection, table: str = "transactions"):
@@ -89,8 +86,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output", type=Path,
-        default=PROJECT_ROOT / "model_bundle" / "v1" / "dest_state.parquet",
-        help="Output parquet path (default: model_bundle/v1/dest_state.parquet)",
+        default=PROJECT_ROOT / "model_bundle" / "v2" / "dest_state.npz",
+        help="Output path (default: model_bundle/v2/dest_state.npz)",
     )
     args = parser.parse_args()
 
@@ -107,12 +104,36 @@ def main():
         con.close()
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    table = pa.Table.from_pandas(df, preserve_index=False)
-    table = table.replace_schema_metadata({
-        **(table.schema.metadata or {}),
-        SNAPSHOT_STEP_METADATA_KEY: str(snapshot_step).encode("utf-8"),
-    })
-    pq.write_table(table, args.output, compression="zstd")
+
+    # Hash, sort and collision-check HERE rather than at load. Serving keeps
+    # only the hashes -- it never needs an account name -- so shipping 571,961
+    # strings meant every cold start paid 2,268 ms to parse and hash data it
+    # then threw away. `hash_many` is imported from inference/state.py rather
+    # than reimplemented, so the build and the lookup cannot drift apart.
+    keys = hash_many(df["name_dest"].tolist())
+    order = np.argsort(keys, kind="stable")
+    keys = keys[order]
+
+    duplicate = keys[:-1] == keys[1:]
+    if duplicate.any():
+        collided_at = int(np.flatnonzero(duplicate)[0])
+        raise DestStateCollisionError(
+            f"64-bit hash collision at sorted index {collided_at} -- two distinct "
+            "name_dest values hash to the same key. Refusing to WRITE a state "
+            "snapshot that would serve one destination's history under another's "
+            "name. (Expected count at 2^64 over ~572k keys is effectively zero; "
+            "ARCHITECTURE.md §2 checks it rather than assuming it.)"
+        )
+
+    np.savez_compressed(
+        args.output,
+        keys=keys,
+        count=df["prior_txn_count"].to_numpy(dtype="int32")[order],
+        avg=df["prior_avg_amount"].to_numpy(dtype="float32")[order],
+        c24=df["txn_count_24h"].to_numpy(dtype="int32")[order],
+        s24=df["amount_sum_24h"].to_numpy(dtype="float32")[order],
+        **{SNAPSHOT_STEP_KEY: np.array([snapshot_step], dtype="int64")},
+    )
 
     size_mb = args.output.stat().st_size / (1024 ** 2)
     logger.info("Wrote %d destination rows (snapshot as of step %d) to %s (%.2f MB)",
@@ -123,7 +144,7 @@ def main():
                 df["prior_txn_count"].mean(), int(df["prior_txn_count"].max()))
 
     if size_mb > MAX_BUNDLE_SIZE_MB:
-        logger.error("dest_state.parquet is %.2f MB, exceeding the %d MB Sprint 3 budget.",
+        logger.error("dest_state.npz is %.2f MB, exceeding the %d MB Sprint 3 budget.",
                      size_mb, MAX_BUNDLE_SIZE_MB)
         sys.exit(1)
 

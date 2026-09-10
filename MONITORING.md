@@ -37,7 +37,7 @@ python tasks.py drift          # or: python src/run_drift.py
 ```
 
 Reads the `features` table `train_pipeline.py` materializes into
-`data/processed/paysim.duckdb`, scores all 6,362,620 rows with `model_bundle/v1`
+`data/processed/paysim.duckdb`, scores all 6,362,620 rows with `model_bundle/v2`
 through `src/inference/`, and writes three artifacts under `data/processed/`:
 
 | File | Shape |
@@ -421,7 +421,7 @@ churning it to remove a coupling that no longer bites is not an improvement.
 
 **8.4.3 `drift_reference.json` records the commit it was generated at**, which
 is necessarily the pre-commit state (`-dirty`, or the parent). The same is true
-of `model_bundle/v1/bundle_meta.json` (`b874804-dirty`). An artifact cannot
+of `model_bundle/v2/bundle_meta.json` (`b874804-dirty`). An artifact cannot
 record the commit that contains it.
 
 ### 8.5 What held up

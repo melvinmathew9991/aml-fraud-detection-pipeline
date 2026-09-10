@@ -434,7 +434,7 @@ jobs:
 
           # The expected bundle version comes from the committed bundle rather
           # than a literal, so the check cannot drift from the artifact.
-          EXPECTED=$(jq -r .bundle_version model_bundle/v1/bundle_meta.json)
+          EXPECTED=$(jq -r .bundle_version model_bundle/v2/bundle_meta.json)
 
           READY=""
           for i in $(seq 1 60); do

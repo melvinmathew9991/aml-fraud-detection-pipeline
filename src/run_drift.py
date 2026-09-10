@@ -25,7 +25,7 @@ rather than a number anyone has to take on trust. `in_reference_period` marks
 them, and the dashboard shades them.
 
 **Both scoring paths that matter are the deployed ones.** Rows are scored with
-`model_bundle/v1` through `inference/`, the same code the API serves with, and
+`model_bundle/v2` through `inference/`, the same code the API serves with, and
 flagged against the bundle's own `decision_threshold` -- so `alert_rate` and
 `precision_at_deployed_threshold` describe what production would actually have
 produced in that window, not what a threshold re-fitted per window would.
@@ -66,7 +66,7 @@ CONFIG = load_config()
 PROCESSED_DIR = PROJECT_ROOT / CONFIG["data"]["processed_dir"]
 REPORTS_DIR = PROJECT_ROOT / "reports"
 DB_PATH = PROCESSED_DIR / "paysim.duckdb"
-BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v1"
+BUNDLE_DIR = PROJECT_ROOT / "model_bundle" / "v2"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 FEATURE_PSI_CSV = PROCESSED_DIR / "drift_feature_psi.csv"

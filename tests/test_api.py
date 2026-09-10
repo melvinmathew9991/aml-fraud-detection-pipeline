@@ -34,7 +34,7 @@ VALID_TXN = {
 
 def _require_real_bundle():
     if not (DEFAULT_BUNDLE_DIR / "bundle_meta.json").exists():
-        pytest.skip("model_bundle/v1 not present -- run export_bundle.py first.")
+        pytest.skip("model_bundle/v2 not present -- run export_bundle.py first.")
 
 
 @pytest.fixture
@@ -47,6 +47,40 @@ def client():
 
 # ---------------------------------------------------------------- health/ready
 
+def test_root_returns_an_index_not_a_404(client):
+    """Regression cover for a real defect found by auditing the deployment.
+
+    The service declared six routes and none at `/`, so every visitor who opened
+    the public URL got a bare 404. That was 100% of the deployment's 4xx rate --
+    17 of 103 requests over 30 days, all of them `/` or `/favicon.ico`, none of
+    them attack traffic. Meanwhile FastAPI's interactive Swagger UI was live and
+    public at `/docs`, one undiscoverable path away.
+    """
+    r = client.get("/")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["docs"] == "/docs"
+    assert body["bundle_version"] == "v2"
+    # The index must not advertise a path the service does not serve -- a
+    # landing page listing dead links is worse than no landing page.
+    for path in body["endpoints"]:
+        assert client.get(path).status_code != 404, f"index advertises missing {path}"
+
+
+def test_root_answers_before_the_bundle_is_loaded():
+    """`/` is deliberately not gated on readiness. It is the first thing a human
+    sees, and "the service is here, the docs are there" beats a 503 while the
+    bundle loads."""
+    app = create_app(rate_limit_max_requests=10_000)
+    # No `with` block, so lifespan never runs and app.state.service is absent.
+    r = TestClient(app).get("/")
+
+    assert r.status_code == 200
+    assert r.json()["bundle_version"] is None
+    assert r.json()["docs"] == "/docs"
+
+
 def test_health_ok(client):
     r = client.get("/health")
     assert r.status_code == 200
@@ -58,7 +92,7 @@ def test_ready_ok(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ready"
-    assert body["bundle_version"] == "v1"
+    assert body["bundle_version"] == "v2"
 
 
 def test_ready_fails_on_corrupted_bundle(tmp_path):
@@ -67,7 +101,7 @@ def test_ready_fails_on_corrupted_bundle(tmp_path):
     # matches bundle_meta.json -- ROADMAP.md's Sprint 4 DoD: "/ready fails
     # correctly on a corrupted bundle."
     for name in ["bundle_meta.json", "scaler.json", "threshold.json",
-                 "model.txt", "dest_state.parquet"]:
+                 "model.txt", "dest_state.npz"]:
         shutil.copy(DEFAULT_BUNDLE_DIR / name, tmp_path / name)
     with open(tmp_path / "threshold.json") as f:
         payload = json.load(f)
@@ -117,7 +151,7 @@ def test_score_echoes_threshold_and_versions(client):
     r = client.post("/score", json=VALID_TXN)
     body = r.json()
     assert body["decision_threshold"] > 0
-    assert body["bundle_version"] == "v1"
+    assert body["bundle_version"] == "v2"
     assert isinstance(body["model_version"], str) and body["model_version"]
 
 
@@ -261,7 +295,7 @@ def test_model_info_contract(client):
     r = client.get("/model-info")
     assert r.status_code == 200
     body = r.json()
-    assert body["bundle_version"] == "v1"
+    assert body["bundle_version"] == "v2"
     assert len(body["feature_names"]) == 18
     # The SERVED bundle's feature-schema version must match the TRAINING code's.
     # A mismatch means the committed bundle is stale relative to features.py --

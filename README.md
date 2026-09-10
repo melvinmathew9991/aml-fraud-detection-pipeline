@@ -528,7 +528,7 @@ fraud-detection-project/
 │   ├── error_analysis.py       # review-queue TP/FP/FN profiling, missed-fraud ranking
 │   ├── economics.py             # capacity-constraint cost + fraud-ticket-size crossover
 │   ├── export_bundle.py         # emits the versioned model_bundle/ serving artifact
-│   ├── build_dest_state.py      # emits dest_state.parquet, the serving-time feature snapshot
+│   ├── build_dest_state.py      # emits dest_state.npz, the serving-time feature snapshot
 │   ├── train_pipeline.py       # main training + CV + Optuna tuning + MLflow pipeline
 │   ├── run_drift.py             # Sprint 8: the drift job -- PSI over dataset time
 │   ├── monitoring/              # Sprint 8: the detector, pure numpy
@@ -553,7 +553,7 @@ fraud-detection-project/
 │                                #   explain (Sprints 0-3), inference unit + skew (plumbing & state)
 │                                #   + API contract (Sprint 4), dashboard (Sprints 5-7),
 │                                #   drift detector + committed-artifact checks (Sprint 8)
-├── model_bundle/v1/             # committed, versioned serving artifact (see ARCHITECTURE.md §3)
+├── model_bundle/v2/             # committed, versioned serving artifact (see ARCHITECTURE.md §3)
 ├── config.yaml                 # paths, CV, model, Optuna, and MLflow config
 ├── requirements-train.txt       # laptop / CI training environment (also runs the API's tests)
 ├── requirements-serve.txt       # serving image only -- no sklearn/shap/duckdb/mlflow/pandas;
@@ -692,11 +692,31 @@ benchmark, and not an estimate):
 | `/score` latency, in-container | **5.3 ms** |
 | `/score` latency, end-to-end over the Docker port mapping | **10.3 ms** |
 
-**The image misses this sprint's own <400MB target by 28%.** Recorded as a
-deviation rather than quietly restated: the prime suspect is `pyarrow`,
+**The image missed this sprint's own <400MB target by 28%.** Recorded as a
+deviation rather than quietly restated: the prime suspects were `pyarrow`,
 carried solely to read `dest_state.parquet`, on top of the `scipy` that
-`lightgbm` pulls in. Confirming that and deciding whether to change the
-bundle's storage format is open work, tracked in ROADMAP Sprint 6.
+`lightgbm` pulls in.
+
+**Both confirmed, one fixed, and the target is now met (2026-09-10).** `pyarrow`
+was carried for a single call, and the v2 bundle's `.npz` removed it — see
+ARCHITECTURE.md §3. `scipy` is 112.7 MB and stays: `lightgbm` requires it
+outright, not as an extra, and imports it eagerly, so a `--no-deps` install
+would break `import lightgbm`. Measured and rejected rather than left open.
+
+Measured by CI (the container job, which is the authority — a local estimate put
+the image at ~435 MB and was 68 MB pessimistic):
+
+| Metric | Before | After |
+|---|---|---|
+| Image, uncompressed | 519.0 MB | **367.5 MB** |
+| Compressed (registry storage) | 172.7 MB | **125.0 MB** |
+| Cold start (`docker run` → first `200`) | 2,761 ms | **2,234 ms** |
+| Memory after a scored request | 190.7 MiB | **71.96 MiB** |
+| Versions inside the 0.5GB free tier | 2 | **3** |
+
+So the <400MB target is met with 32.5 MB to spare, and the registry now holds
+three versions inside the conservative free-tier reading — which also resolves
+the "over the allowance between cleanup sweeps" finding in `GCP.md` §6.
 
 Getting the first green run required three real defects to be fixed, none
 of which any local test could have caught — see ROADMAP Sprint 6.
@@ -753,7 +773,7 @@ of which any local test could have caught — see ROADMAP Sprint 6.
 - **The serving artifact is version-portable by construction**: `model.txt`
   is LightGBM's native text format, not a pickle, and the scaler ships as
   two JSON arrays applied in pure numpy — no scikit-learn, duckdb, mlflow,
-  shap, or pandas in `model_bundle/v1/`, verified by reproducing a 200-row
+  shap, or pandas in `model_bundle/v2/`, verified by reproducing a 200-row
   golden file to floating-point equality in a venv containing only
   `requirements-serve.txt`. See `src/export_bundle.py`, `src/build_dest_state.py`,
   and `ARCHITECTURE.md` §3.
@@ -771,7 +791,7 @@ experiment rigor with CV/Optuna/MLflow; the capacity-based operating point,
 destination velocity/graph features, SHAP, and error analysis described
 above; and, in Sprint 3, a `pytest` suite, a pandera ingest schema, the
 `src/economics.py` business-decision layer, the two zero-SHAP features'
-removal, and the versioned `model_bundle/v1/` serving artifact (native
+removal, and the versioned `model_bundle/` serving artifact (native
 LightGBM text format + a pure-numpy scaler + the per-destination state
 snapshot — no scikit-learn/duckdb/mlflow in the serving path, verified by
 reproducing the golden file in a venv containing only
@@ -790,7 +810,8 @@ not just an import check) in a `requirements-serve.txt`-only venv, with
 measured p95 = 4.9ms locally against a 100ms target. Two real
 bundle-integrity bugs were also found and fixed in the process (a Windows
 line-ending checkout issue plus a stale checksum, both in
-`model_bundle/v1/`) — see `ARCHITECTURE.md` §12 for detail. A follow-up
+`model_bundle/v1/`, the bundle version current at the time) — see
+`ARCHITECTURE.md` §12 for detail. A follow-up
 audit of Sprints 0-4 together (still 2026-08-02) found no functional bugs
 in the untouched Sprint 0-2 modules, closed the one real gap it did find
 (`error_analysis.py`/`explain.py` were the only two non-trivial `src/`
