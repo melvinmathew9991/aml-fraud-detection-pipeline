@@ -1168,6 +1168,11 @@ story.
       drill revision. Cloud Run refuses to delete the latest-created revision;
       it holds 0% traffic, cannot start, and therefore costs nothing. It becomes
       deletable after the next deploy to `main`.
+      *[Corrected 2026-09-10: it is already gone. The audit log records the
+      refused `Revisions.DeleteRevision` (FAILED_PRECONDITION, 12:26) and the
+      revision is absent from the service today, so it was removed once a later
+      deploy displaced it as latest. No cleanup task remains -- this note was
+      carried forward as outstanding for a day after it had been resolved.]*
 - [x] Sprint 8 -- monitoring & drift (2026-09-10). `src/monitoring/drift.py`
       (PSI detector, pure numpy) + `src/run_drift.py` (the job) + 23
       injected-shift tests + 16 artifact tests + dashboard page 5 + a daily

@@ -43,8 +43,8 @@ jobs:
     name: Drift detector regression
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       # The detector is pure numpy (src/monitoring/drift.py imports nothing
@@ -66,7 +66,7 @@ jobs:
     name: Deployed service check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: skip notice
         if: vars.CLOUD_RUN_URL == ''

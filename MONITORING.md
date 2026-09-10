@@ -251,6 +251,21 @@ built; the mechanism is the deploy pipeline that already exists.
    something stronger than rollback: a revision that never took traffic has
    nothing to undo.
 
+**The rollback horizon is set by Artifact Registry, not by the revision list**
+(measured 2026-09-10). Cloud Run retains revisions indefinitely — there are 10 —
+but the registry cleanup policy keeps only the 2 most recent images, so an older
+revision's image is deleted out from under it. Today exactly **3 of 10 retained
+revisions still have an image** (`00020-lod`, `00018-das`, `00016-ret`); the
+other seven, including Sprint 7's original `00001-jr7`, point at digests that no
+longer exist. They report `STATUS: True` regardless, because that reflects their
+last successful state, not present image availability.
+
+This does not weaken the deploy design, which never moves traffic to an
+unverified revision and therefore treats rollback as "do not migrate" rather
+than "go back N". But "roll back to any revision" is not a capability this
+project has, and it is a consequence of the 2-version retention decision that
+`GCP.md` §6 analysed on cost and not on recoverability.
+
 ---
 
 ## 6. The scheduled check — and why it is not Cloud Scheduler
@@ -291,9 +306,15 @@ GitHub Actions cron schedule, which is free for public repositories and removes
 the GCP dependency entirely". The consequence is that Sprint 8 consumes **0 of
 the 3 free Cloud Scheduler jobs** and adds no GCP billing surface at all.
 
-The workflow is inert until configured, the same pattern the deploy pipeline
-uses: with the `CLOUD_RUN_URL` repository variable unset, the probe steps skip
-and the detector tests still run.
+The workflow was written inert until configured, the same pattern the deploy
+pipeline uses: with the `CLOUD_RUN_URL` repository variable unset, the probe
+steps skip and the detector tests still run.
+
+**It is configured.** `CLOUD_RUN_URL` was set to the deployed service on
+2026-09-10 and the workflow has run against it (see §8.6). The measured cost of
+the daily probe, against `GCP.md` §2's allowances: 120 requests, 159 vCPU-s and
+80 GB-s per month — 0.006%, 0.089% and 0.022% of the free tier respectively.
+The probe wakes a scale-to-zero service once a day; that is the entire expense.
 
 ---
 
@@ -427,18 +448,34 @@ record the commit that contains it.
 
 ### 8.6 What this audit did not cover
 
-- **The scheduled workflow has never executed on GitHub.** Its YAML parses, its
-  heredoc terminates at column 0, its Python and staleness logic were run
-  locally, and its detector step was run in an isolated venv — but cron
-  workflows only run from the default branch, so the first real execution will
-  be after merge. Treat the first scheduled run as the verification step, the
-  way `DEPLOY.md` §0 treats the first deploy.
+- ~~**The scheduled workflow has never executed on GitHub.**~~ **Closed
+  2026-09-10.** It has now run for real (`workflow_dispatch`, run
+  `34464300887`), both jobs green: the detector's 23 injected-shift tests passed
+  in the numpy-only install, `skip notice` was skipped — confirming
+  `CLOUD_RUN_URL` took effect — `/health` and `/ready` returned
+  `status: ready`, `bundle_version: v1`, telemetry was recorded, and the
+  stale-reference check printed *"Drift reference matches the deployed bundle v1
+  (generated 2026-09-10)"* against the live service. The daily cron is armed.
 - **`smoke-train` was not run locally.** It regenerates the synthetic sample over
   `data/raw/paysim_transactions.csv`, the path holding the real dataset. CI runs
   it; this machine must not.
-- **The dashboard was verified with Streamlit's `AppTest`, not a browser.** All
-  three charts, both tables and all seven metrics render with no exception, but
-  Sprint 7 is the reminder that Community Cloud can differ from local — it found
-  a Python-version difference and a requirements-resolution surprise.
+- ~~**The dashboard was verified with Streamlit's `AppTest`, not a browser.**~~
+  **Closed 2026-09-10** — the Drift page was opened on the deployed Community
+  Cloud app, which is the environment Sprint 7 proved can differ from local (it
+  found a Python-version difference, a requirements-resolution surprise and a
+  six-week-old import regression). Not just "it renders": the figures on the
+  live page were read back and checked against the committed artifacts, and all
+  seven agree — 31 windows, 3 score-PSI breaches, 10/18 features ever breaching,
+  1 undersized window, reference steps 1–355 over 5,113,884 rows, bundle `v1`.
+  That closes the chain end to end, from the job's output through the committed
+  CSVs to what a viewer actually sees. Local `AppTest` still covers all three
+  charts, both tables and all seven metrics with no exception.
+
+  Still open, and belonging to Sprint 7 rather than this sprint: whether an
+  **anonymous** visitor can reach that dashboard. Measured from outside on
+  2026-09-10, an unauthenticated client — browser User-Agent, following
+  redirects — ends in a loop at `share.streamlit.io/-/auth/app` with no content,
+  while Streamlit's edge answers `/healthz` with 200. A signed-in owner sees a
+  working app either way, which is why the two observations coexist.
 - **No load or concurrency testing** of the drift job; it is a single-process
   batch script by design.
