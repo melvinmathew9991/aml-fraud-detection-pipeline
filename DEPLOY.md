@@ -450,6 +450,11 @@ Retention is **2 versions**, sized in `GCP.md` §6 against a measured
 510.6 MB uncompressed / 169.8 MB compressed image (CI run `30795258811`). Three
 versions breach the decimal reading of the "0.5 GB" free tier by 34 MB.
 
+*[2026-09-12: the image has since been re-measured twice — 518.9/172.7 MB (run
+`34344122710`), then **367.5/125.0 MB** after PR #21 (`cea59f4`) dropped
+`pyarrow`. At 125.0 MB three versions would fit; the deployed policy is
+deliberately still 2. The commands below are unchanged and still correct.]*
+
 ### 3.1 Create the repository
 
 The name is **not** free choice: `.github/workflows/ci.yml` hardcodes
@@ -513,6 +518,11 @@ At 169.8 MB compressed, a third version transiently present is 509 MB against a
 500 MB decimal allowance -- a real, if brief, overshoot. It is bounded by the
 policy and by `max 2` builds mattering at a time, not by anything this runbook
 does, and it is recorded rather than papered over.
+
+*[At the post-PR-#21 125.0 MB, the same transient third version is 375 MB and
+no longer overshoots; a transient fourth would be exactly 500 MB. The overshoot
+described here was real at the size it was measured at, and the mechanism is
+unchanged.]*
 
 **Understated, as it turned out.** That paragraph models one transient third
 version for "some hours". What actually happened on 2026-09-09 was **seven

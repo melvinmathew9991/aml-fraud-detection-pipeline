@@ -282,10 +282,14 @@ running PSI over demo traffic, which this sprint's design already rejected.
 
 **And it could not run in the cloud anyway.** The comparison data is the 493 MB
 raw dataset, which is gitignored and not in the serving image — deliberately: the
-image is 518.9 MB compressed to 172.7 MB and Artifact Registry's free tier holds
-two versions (`GCP.md` §6). Getting the data to a scheduled cloud job would mean
-Cloud Storage plus a Cloud Run job, i.e. new billing surface for a job whose
-answer never changes.
+image is 367.5 MB compressed to 125.0 MB against an Artifact Registry free tier
+that holds a handful of versions (`GCP.md` §6). Getting the data to a scheduled
+cloud job would mean Cloud Storage plus a Cloud Run job, i.e. new billing
+surface for a job whose answer never changes.
+
+*[Figures updated 2026-09-12: this read 518.9 MB / 172.7 MB and "holds two
+versions", measured before PR #21 dropped `pyarrow`. The argument is unchanged
+— a 493 MB dataset does not fit in a serving image at any of these sizes.]*
 
 **What does change on a schedule is the deployed service**, so that is what the
 scheduled job watches. `.github/workflows/monitoring.yml` runs daily and:

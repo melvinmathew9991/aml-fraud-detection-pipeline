@@ -548,7 +548,7 @@ fraud-detection-project/
 │       ├── limits.py             # request body size cap
 │       ├── metrics.py            # in-memory counters backing /metrics
 │       └── audit.py              # structured JSON prediction audit log
-├── tests/                      # pytest suite, 231 tests: features/metrics/threshold/cv/schema/
+├── tests/                      # pytest suite, 234 tests: features/metrics/threshold/cv/schema/
 │                                #   economics/bundle/golden-file/train-determinism/error-analysis/
 │                                #   explain (Sprints 0-3), inference unit + skew (plumbing & state)
 │                                #   + API contract (Sprint 4), dashboard (Sprints 5-7),
@@ -680,7 +680,11 @@ docker run -p 8000:8080 fraud-api
 ```
 
 Built and integration-tested exclusively in CI (`.github/workflows/ci.yml`)
-— this dev machine has no Docker (ARCHITECTURE.md §8, GIT_WORKFLOW.md).
+— CI is the authoritative build (ARCHITECTURE.md §8, GIT_WORKFLOW.md). Docker
+Desktop has been installed on this dev machine since 2026-09-09, but the image
+is still never built here: CI is the only build that enforces the 512MiB Cloud
+Run memory ceiling and runs the `trivy` scan, so a local `docker build` proves
+strictly less.
 
 Measured in CI (run `30788266390`, the first green run — not a local
 benchmark, and not an estimate):
@@ -818,8 +822,8 @@ in the untouched Sprint 0-2 modules, closed the one real gap it did find
 modules without dedicated tests), and fixed a few small drift risks
 (a hardcoded value duplicated instead of shared with its own constant, a
 swallowed exception with no log line, three CSVs generated but never
-logged to MLflow). The `pytest` suite stands at **231 tests** as of
-2026-09-10, all passing, and runs in CI on every pull request.
+logged to MLflow). The `pytest` suite stands at **234 tests** as of
+2026-09-12, all passing (22.6s locally), and runs in CI on every pull request.
 
 **Sprints 5 through 8 have since shipped**: the Streamlit dashboard, the
 container and CI gate, the Cloud Run deployment (live, with a verified budget

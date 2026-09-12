@@ -184,6 +184,11 @@ dest_state.parquet
   amount_sum_24h        DOUBLE
 ```
 
+The schema above is v1's parquet, kept because it is the clearest statement of
+*what* the snapshot holds. **v2 ships the same content as `dest_state.npz`,
+keyed by 64-bit hash rather than by name** — see "`dest_state` is `.npz`, not
+parquet" in §3 for why, and `bundle_meta.json` for what is actually committed.
+
 Sizing (measured, not estimated):
 - 571,961 non-merchant destinations need a row.
 - 2,150,401 merchant (`M%`) destinations average **1.0005** transactions each,
@@ -309,7 +314,9 @@ Consequences, all deliberate:
   study. This removes the need for a precomputed reason-code table entirely and
   makes `/score` genuinely explainable per request.
 - Serving requirements collapse to: `fastapi, uvicorn, pydantic, numpy,
-  lightgbm, pyarrow`. Target image < 400MB uncompressed.
+  lightgbm`. Target image < 400MB uncompressed — met at 367.5 MB once the v2
+  bundle dropped `pyarrow` (above); `requirements-serve.txt` is the source of
+  truth and the isolation job enforces it.
 - `bundle_meta.json` carries sha256 per file. The API verifies them at startup
   and refuses to serve a tampered or partial bundle.
 
@@ -320,7 +327,7 @@ Three files, because three environments have genuinely different needs:
 | File | Consumer | Contents |
 |---|---|---|
 | `requirements-train.txt` | laptop, CI smoke-train | everything today (incl. shap/numba/mlflow/optuna), plus `networkx`, `scipy.stats` for Sprint 11 |
-| `requirements-serve.txt` | Docker image | `fastapi, uvicorn, pydantic, numpy, lightgbm, pyarrow`; **+ Sprint 10-12**: `psycopg[binary]`, `google-genai` |
+| `requirements-serve.txt` | Docker image | `fastapi, uvicorn, pydantic, numpy, lightgbm`; **+ Sprint 10-12**: `psycopg[binary]`, `google-genai` |
 | `dashboard/requirements.txt` | Streamlit Community Cloud | `streamlit, pandas, plotly, requests` |
 
 The Sprint 10-12 serving additions are the only growth to the image, and both
@@ -357,14 +364,14 @@ has a CI job proving its isolation; the dashboard path has no equivalent.
 a **release artifact**, versioned deliberately:
 
 ```
-model_bundle/v1/    <- committed, un-ignored
+model_bundle/v2/    <- committed, un-ignored
 ```
 
-**Measured total ~9.2MB** (`model.txt` 1.70MB + `dest_state.parquet` 7.48MB +
+**Measured total 8.27MB** (`model.txt` 1.70MB + `dest_state.npz` 6.57MB +
 three small JSON files), comfortably under GitHub's limits and small enough that
 the repo stays self-contained: CI, `docker build`, and a fresh clone all work
 with no external fetch and no credentials. If the bundle ever exceeds ~40MB,
-move `dest_state.parquet` to a GitHub Release asset and have the Dockerfile
+move `dest_state.npz` to a GitHub Release asset and have the Dockerfile
 fetch it by tag — the loader already verifies sha256, so the integrity check is
 unchanged.
 
@@ -532,16 +539,27 @@ main:  above -> docker build -> trivy scan -> push Artifact Registry
   both. Applied before the first image is pushed, not retrofitted. Full sizing in
   `GCP.md` §6; the container job re-measures on every build and warns if the
   image outgrows the policy.
+  *[Re-measured 2026-09-10 by PR #21 (`cea59f4`): **367.5 MB uncompressed /
+  125.0 MB compressed** after v2 dropped `pyarrow`. Three versions now fit both
+  readings (375 MB). The policy remains `keepCount: 2` — changing it is a live
+  GCP config decision, not a documentation update.]*
 - Deploy is gated on `/ready` returning 200 with matching `bundle_version`;
   otherwise traffic stays on the previous revision.
 
 ### CI is also the only container runtime
 
-Verified 2026-08-01: `docker`, `gh` and `gcloud` are absent from the dev machine.
+Verified 2026-08-01: `docker`, `gh` and `gcloud` were absent from the dev machine.
 Docker Desktop's WSL2 backend costs ~2GB idle on a dual-core/8GB box, which this
 project cannot spare while training. So **the image is never built locally** —
 CI is the build environment *and* the integration-test environment. Local
 development runs `uvicorn` and `streamlit` as plain processes.
+
+*[Updated 2026-09-12: all three tools are now installed — `gh` (2026-08-03),
+`gcloud` and Docker Desktop (both 2026-09-09). The premise changed; the decision
+did not. CI remains the authoritative build, because it is the only place that
+enforces the 512MiB Cloud Run ceiling and runs `trivy`, and Docker Desktop's
+idle cost is still real on this box. What this removes is the claim that a local
+build is impossible — it is possible and still not authoritative.]*
 
 This is a real constraint with a real cost: container defects surface only on a
 CI round-trip (~3-5 min), never at a local prompt. It is accepted deliberately
@@ -617,8 +635,9 @@ recording here, since this section is what they contradict.
 Scheduler (1 of 3 free jobs) running the PSI job. But the analysis is
 deterministic over a fixed historical dataset — re-running it returns a
 byte-identical answer forever — and its input is the 493MB raw dataset, which is
-gitignored and deliberately not in the 172.7MB serving image. A schedule over
-that computation is the same category of error as PSI over demo traffic, which
+gitignored and deliberately not in the serving image (125.0MB compressed since
+PR #21; 172.7MB when this was written). A schedule over that computation is the
+same category of error as PSI over demo traffic, which
 this section already rejected. What changes between runs is the *deployed
 service*, so `.github/workflows/monitoring.yml` watches that instead: it re-runs
 the injected-shift suite, probes `/health` `/ready` `/model-info` `/metrics`, and

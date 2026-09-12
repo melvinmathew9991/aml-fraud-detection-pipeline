@@ -397,10 +397,23 @@ default:
    retrained, and the resulting model would not be identical. The committed
    bundle is the only copy, which is why it is tracked in git rather than
    treated as a build output.
+
+   *[2026-09-12: the path is now `model_bundle/v2/` — v1 was repackaged on
+   2026-09-10 (parquet → `.npz`) and is no longer in the repo. **The risk is
+   unchanged, not resolved**: v2 was converted from v1's arrays rather than
+   rebuilt from source, so it carries the same `run_id`, `trained_at` and
+   `git_commit: b874804-dirty`, and still traces to no surviving training
+   artifact. The regeneration this item calls for has not happened.]*
 6. **Image size 510.6 MB against a `<400 MB` target** (28% over). Carried from
    Sprint 6 as a documented deviation. `pyarrow` — present solely to read
    `dest_state.parquet` — is the prime suspect, alongside the `scipy` that
    `lightgbm` pulls in. Dropping it means changing the bundle's storage format.
+
+   *[Closed 2026-09-10 by PR #21, recorded 2026-09-12: the storage format was
+   changed. The v2 bundle ships `dest_state.npz` and `pyarrow` is gone from
+   `requirements-serve.txt`; `scipy` stays, measured at 112.7 MB and required
+   by `lightgbm`. CI measured 367.5 MB uncompressed / 125.0 MB compressed —
+   target met. This item is no longer outstanding.]*
 
 ---
 
@@ -410,8 +423,11 @@ Stated so the clearance above is not read as broader than it is:
 
 - **No full training re-run.** Published metrics were verified against the
   committed CSVs, not regenerated from the 6.36 M-row dataset (~28 min).
-- **No container run.** This machine has no Docker by design; container
-  behaviour is known only from CI.
+- **No container run.** This machine had no Docker at the time of this audit;
+  container behaviour is known only from CI. *[2026-09-12: Docker Desktop has
+  since been installed (2026-09-09). It does not change what this audit
+  covered, and CI remains the authoritative container evidence — it is the only
+  build that enforces the 512MiB Cloud Run ceiling and runs `trivy`.]*
 - **No load or soak testing.** `/score` p95 is asserted locally by the test
   suite; nothing has been tested under concurrency.
 - **No adversarial or security review** of the API beyond the existing

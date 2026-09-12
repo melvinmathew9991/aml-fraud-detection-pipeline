@@ -20,10 +20,10 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | Operating point | Capacity-based K + deployable `decision_threshold` | Sprint 2 |
 | Explainability | SHAP global + per-alert reason codes (offline) | Sprint 2 |
 | Error analysis | TP/FP/FN queue profile, missed-fraud ranking | Sprint 2 |
-| **Testing** | `pytest` suite, **231 tests** as of 2026-09-10 (features/metrics/threshold/cv/schema/economics/bundle/golden-file/inference/skew/api/dashboard/drift) | Sprint 3, extended 4-8 |
+| **Testing** | `pytest` suite, **234 tests** as of 2026-09-12 (features/metrics/threshold/cv/schema/economics/bundle/golden-file/inference/skew/api/dashboard/drift) | Sprint 3, extended 4-8 |
 | **Data validation** | `pandera` schema on raw ingest (dtypes, ranges, nullability, `type` enum) | Sprint 3 |
 | **Business decision layer** | `src/economics.py` — net value, capacity-constraint cost, ticket-size crossover; naive optimum tested and found degenerate | Sprint 3 |
-| **Serving artifact** | Versioned `model_bundle/v1/` (~9.2MB): LightGBM native format + pure-numpy scaler + `dest_state.parquet` — verified to reproduce the golden file in a `requirements-serve.txt`-only venv | Sprint 3 |
+| **Serving artifact** | Versioned `model_bundle/v2/` (8.27MB): LightGBM native format + pure-numpy scaler + `dest_state.npz` — verified to reproduce the golden file in a `requirements-serve.txt`-only venv. v2 is a packaging bump of v1 (same model); it dropped `pyarrow` from serving | Sprint 3, repackaged post-Sprint 8 |
 | Feature set | 18 features (two zero-SHAP features removed, `FEATURE_VERSION` 3) | Sprint 3 |
 | **Serving** | `src/inference/` core (bundle/state/features/score/rules) + FastAPI service (`/health`, `/ready`, `/model-info`, `/score`, `/score/batch`, `/metrics`); both skew tests pass; verified end-to-end (real `uvicorn` process, real HTTP requests) in a `requirements-serve.txt`-only venv | Sprint 4 |
 | **CI/CD** | GitHub Actions PR gate, green: `lint-test` (ruff → mypy → pytest → smoke-train), `serving-isolation` (serve-deps-only + real uvicorn over HTTP), `container` (build → cold-start → `/score` assertions → trivy) | Sprint 6 |
@@ -255,12 +255,18 @@ cut pages 4-5. It carries the project's headline finding.
 **Goal:** reproducible build and an automated quality gate — **without
 installing Docker on this machine.**
 
-Verified 2026-08-01: `docker`, `gh` and `gcloud` are all absent, and there is no
+Verified 2026-08-01: `docker`, `gh` and `gcloud` were all absent, and there was no
 `.github/workflows/`. Docker Desktop's WSL2 backend costs ~2GB idle on a
 dual-core/8GB box (see hardware notes), which is a bad trade for a container
 this project never needs to run locally. So the image is **built and tested
 exclusively in CI**, and local development runs `uvicorn` and `streamlit`
 directly. This is a deliberate constraint-driven choice, not a shortcut.
+
+*[Updated 2026-09-12: all three tools are installed now -- `gh` 2026-08-03,
+`gcloud` and Docker Desktop 2026-09-09. The sprint's design is unchanged and
+still right: CI is the only build that enforces the 512MiB Cloud Run ceiling
+and runs `trivy`, so a local `docker build` proves strictly less. See
+ARCHITECTURE §8.]*
 
 - Multi-stage `Dockerfile` on `python:3.12-slim`, non-root user, serving deps
   only. Target < 400MB uncompressed.
@@ -313,6 +319,15 @@ terminal much faster than the web UI.
   under both. The container job now measures compressed size on every run and
   warns if the image grows past what the policy assumes, so this cannot go
   stale silently the way the 185MB figure did.
+
+  *[Re-measured 2026-09-10 by PR #21 (commit `cea59f4`), recorded here
+  2026-09-12: the v2 bundle dropped `pyarrow`, taking the image to **367.5 MB
+  uncompressed / 125.0 MB compressed**. The arithmetic above is superseded --
+  at 125.0 MB, three versions are 375 MB and fit both readings (125 MB of room
+  against the 500 MB decimal reading, 161.9 MB against 512 MiB); four are
+  exactly 500 MB and do not. **The deployed policy is still `keepCount: 2`**
+  and is deliberately left alone here -- raising it is a change to live GCP
+  config and a decision in its own right, not a doc correction.]*
 - Workload Identity Federation — no service-account JSON in repo secrets.
 - Deploy Cloud Run `us-central1`: `--min-instances=0 --max-instances=2
   --memory=512Mi --cpu=1 --concurrency=80 --timeout=30s`.
@@ -1049,6 +1064,14 @@ story.
       `dest_state.parquet`, atop the `scipy` `lightgbm` pulls in. Whether
       to change the bundle's storage format to drop pyarrow is an open
       decision, not a silent restatement of the target.
+      *[Closed 2026-09-10 by PR #21, recorded here 2026-09-12: both suspects
+      were confirmed and one was fixed. The v2 bundle stores the snapshot as
+      `.npz`, which dropped `pyarrow` (84.3 MB of a 133.6 MB dependency
+      footprint); `scipy` was measured at 112.7 MB and kept, because `lightgbm`
+      requires it outright and imports it eagerly. CI measured the image at
+      **519.0 -> 367.5 MB** uncompressed and **172.7 -> 125.0 MB** compressed,
+      so the <400MB target is met with 32.5 MB to spare. The original
+      deviation is left standing above rather than overwritten.]*
       Delivered:
       * **First CI in the project's history**: `.github/workflows/ci.yml`,
         three jobs -- `lint-test` (ruff -> mypy(src/inference) -> pytest ->
@@ -1064,7 +1087,8 @@ story.
         `appuser`, venv-only copy into the final stage (no build toolchain
         or pip cache in the shipped image), plus `libgomp1` for LightGBM.
         **510.6 MB measured, over the <400MB target** -- see above and
-        README "Serving image".
+        README "Serving image". *[Superseded 2026-09-10: 367.5 MB, target
+        met -- see the correction above.]*
       * **First-ever local lint/type-check pass, done deliberately rather
         than trusted to ruff's defaults**: `pyproject.toml` pins an explicit
         `[tool.ruff.lint] select` (ruff 0.16.1 enables ~920 rules by default
@@ -1082,7 +1106,9 @@ story.
         project-wide. Full 174-test suite re-verified passing after every
         change.
       * **`docker-compose.yml`** committed for anyone cloning with Docker,
-        explicitly marked CI-verified-only (no Docker on this dev machine).
+        explicitly marked CI-verified-only (no Docker on this dev machine at
+        the time -- Docker Desktop was installed 2026-09-09; CI remains the
+        authoritative build, see ARCHITECTURE §8).
       * **One real incident**: mid-sprint, testing the smoke-train step
         locally ran `generate_sample_data.py`, which overwrote
         `data/raw/paysim_transactions.csv` -- the same path the real,
@@ -1197,6 +1223,16 @@ story.
       the final training fold (steps 1-355, 5,113,884 rows, 3,963 fraud);
       comparison = 31 successive simulated days over all 6,362,620 rows, each
       scored with `model_bundle/v1` through the serving code path.
+      *[2026-09-12: that is correct as a record of the run -- the measurement
+      was made with v1. The reference committed today is labelled v2:
+      `bf06f8d` regenerated `drift_reference.json`, changing only its four
+      provenance fields (`generated_at`, `run_id` 20260910T105826Z,
+      `git_commit` 6b4abc5-dirty, `bundle_version`). The drift output CSVs were
+      not regenerated and did not need to be -- v2's arrays were converted from
+      v1's, not rebuilt, so the job's output is byte-identical (ARCHITECTURE
+      §3). The numbers below therefore stand unchanged, and the monitoring
+      cron's stale-reference check compares the served bundle against this
+      v2 label.]*
       Six findings:
       (1) **The control works, which is what makes the rest readable.** Windows
       5-13 -- nine consecutive high-volume windows inside the reference period --
@@ -1263,6 +1299,39 @@ story.
       the drift job can stamp provenance without importing the training
       pipeline's module-level logging and mkdir side effects.
 - [ ] Sprint 9 -- portfolio polish **(project is complete and shippable here)**
+      * [x] **Stale-claim sweep (2026-09-12)** -- first Sprint 9 item, done
+        ahead of the diagram and README rewrite so the rewrite builds on true
+        statements. Seven tracked docs carried claims that had gone stale in
+        three clusters: (1) **"this machine has no Docker"** (README,
+        ARCHITECTURE §8, AUDIT §7, ROADMAP Sprint 6) -- Docker Desktop was
+        installed 2026-09-09, along with `gh` and `gcloud`, so the *premise* of
+        the CI-only build was false while the *decision* stayed right; CI is
+        still the only build enforcing the 512MiB ceiling and running `trivy`.
+        (2) **The image/retention figures** (GCP §4 and §6, DEPLOY, ARCHITECTURE,
+        MONITORING, ROADMAP Sprint 6/7) still read 510.6-518.9 MB with `pyarrow`
+        named as an open suspect, all superseded by PR #21's measured
+        367.5 MB / 125.0 MB. (3) **The serving artifact** was still documented as
+        `model_bundle/v1/` with `dest_state.parquet` and `pyarrow` in the
+        dependency list; the repo ships only `model_bundle/v2/` with
+        `dest_state.npz`, measured at 8.27MB on disk.
+        **Method and its limits, stated because this repo's recurring defect is
+        the opposite:** historical records (AUDIT, the Sprint 6/7 entries above)
+        were given dated correction notes rather than overwritten, per the house
+        style already used at the Sprint 7 revision note. Nothing live referenced
+        the v1 bundle -- verified, only three historical comments mention it.
+        The **test count was re-verified by running the suite: 234 passed in
+        22.6s**, against a documented 231; `git log -S` plus a count of added
+        test functions in `bf06f8d` (+1 net) and `6b4abc5` (+2) shows 231 was
+        *correct when written* on 2026-09-10 and superseded by two later
+        commits -- a supersede, not a false claim.
+        **Not done, deliberately:** the Artifact Registry policy stays at
+        `keepCount: 2` even though three versions now fit -- that is a live GCP
+        config change and a decision of its own, not a doc correction. **Could
+        not verify:** the CI run ID that measured 367.5/125.0 MB; the container
+        job's log returned nothing for it, so every new citation points at
+        commit `cea59f4` (which recorded the numbers) rather than a run ID that
+        could not be confirmed. `REPORT.md` is untracked and still reads
+        "192 tests" / 518.9 MB; left alone as the user's own file.
 - [x] Market-alignment review of the plan against 2026 DS hiring requirements
       (2026-08-01, not itself a sprint). Verdict: the MLOps spine is well
       targeted -- "model serving, monitoring, feature stores" are exactly the
