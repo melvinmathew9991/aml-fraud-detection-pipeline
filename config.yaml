@@ -135,8 +135,11 @@ economics:
   liability_rate: 1.0
   # Swept in the degeneracy check to show the naive "find the optimum"
   # framing never changes its answer across a wide range of assumptions --
-  # see README/ARCHITECTURE for the 85,000-161,875 break-even finding this
-  # grid reproduces.
+  # see README/ARCHITECTURE for the 84,942-161,795 break-even finding this
+  # grid reproduces. (Corrected 2026-09-12: this comment said 85,000-161,875,
+  # which is the figure you get using `k` rather than the `n_flagged` that
+  # degeneracy_check actually uses. Verified by re-running the function against
+  # the committed capacity_sweep.csv.)
   degeneracy_recovery_rate_grid: [0.05, 0.1, 0.25, 0.5, 0.75, 1.0]
   # The two capacity levels the constraint-cost question compares -- 250 is
   # the "zero false positives" operating point from the Results writeup, 500
