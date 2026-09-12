@@ -29,7 +29,7 @@ production-shaped, end-to-end system suitable for a portfolio deep-dive.
 | **CI/CD** | GitHub Actions PR gate, green: `lint-test` (ruff → mypy → pytest → smoke-train), `serving-isolation` (serve-deps-only + real uvicorn over HTTP), `container` (build → cold-start → `/score` assertions → trivy) | Sprint 6 |
 | **Deployment** | Live on Cloud Run at `https://fraud-api-amj2cl4jhq-uc.a.run.app`; dashboard on Streamlit Community Cloud. Deploy-without-traffic + smoke test + rollback drill all verified (`DEPLOY.md`) | Sprint 7 |
 | **Monitoring** | PSI per feature + on the score, over 31 windows of dataset time (`src/monitoring/drift.py`, `src/run_drift.py`); injected-shift detector tests; retraining criteria and champion/challenger path in `MONITORING.md`; daily scheduled service + stale-reference check | Sprint 8 |
-| **Governance** | Prediction audit log live (structured JSON, feature-hashed); model card live (`src/model_card.py`, dashboard page 4, limitations served on `/model-info`) | Sprint 4 / Sprint 5 |
+| **Governance** | Prediction audit log live (structured JSON, feature-hashed); model card live (`src/model_card.py`, dashboard page 4, limitations served on `/model-info`) + the written card `MODEL_CARD.md` (Sprint 9) | Sprint 4 / Sprint 5 / Sprint 9 |
 | **Database** | **None — no persistent store anywhere** | Sprint 10 |
 | **Auth/security** | **None — endpoint would be fully open** | Sprint 10 |
 | **Graph analytics** | Origin-side proven impossible; destination-side unbuilt | Sprint 11 |
@@ -48,7 +48,7 @@ contradicted by its own CSV, and a tie-handling inconsistency between `k` and
 | Requirements | Problem framing, capacity-based operating point, success metric | 0-2 | Done |
 | Requirements | **Business framing: expected-value optimum, not just an exchange rate** (ARCHITECTURE §0) | 3 | Done |
 | Design | `ARCHITECTURE.md`: topology, skew resolution, bundle format, API surface, cost controls | — | Done |
-| Design | Rendered architecture diagram, model card | 9 | Planned |
+| Design | Rendered architecture diagram (mermaid, ARCHITECTURE §1), model card (`MODEL_CARD.md`) | 9 | **Done 2026-09-12** |
 | Development | Config-driven modular pipeline, DuckDB data layer | 0-2 | Done |
 | Development | `src/inference/` shared core, FastAPI service | 4 | Done |
 | Development | Streamlit dashboard | 5 | Planned |
@@ -641,7 +641,14 @@ story.
       table (not our engineered features, so not a leak): in that window
       98.8% of fraud has `amount_to_balance_ratio` exactly 1.00 (account
       drained to the cent) and 100% has `dest_is_merchant=0` -- a known
-      PaySim construction characteristic. That's a narrow, nonlinear
+      PaySim construction characteristic.
+      *[Corrected 2026-09-12: the real figure is **99.1%, 763 of 770**. The
+      100% `dest_is_merchant=0` half is exact. Re-derived from the raw
+      transaction table over steps (281, 355] -- which returns exactly the 770
+      fraud rows this fold records -- under four separate readings of "drained
+      to the cent" (exact equality, ratio rounded to 2dp, ±0.005 tolerance,
+      `newbalanceOrig = 0`); all four return 763, so no definition yields 98.8%.
+      The conclusion is unchanged and if anything slightly stronger.]* That's a narrow, nonlinear
       value-band rule trees split out trivially and a single linear
       hyperplane structurally cannot express regardless of class
       weighting. **Those two figures are the Sprint 1 feature set's**, and
@@ -1332,6 +1339,86 @@ story.
         commit `cea59f4` (which recorded the numbers) rather than a run ID that
         could not be confirmed. `REPORT.md` is untracked and still reads
         "192 tests" / 518.9 MB; left alone as the user's own file.
+      * [x] **Rendered architecture diagram (2026-09-12)** -- ARCHITECTURE §1's
+        ASCII topology replaced with a mermaid `flowchart`, which GitHub renders
+        natively. Chosen over a committed PNG/SVG deliberately: this repo's whole
+        method is reviewable diffs and checksummed artifacts, and a binary image
+        can be neither diffed nor verified. **Built components are solid boxes and
+        Sprints 10-12 are dotted and labelled NOT BUILT** -- the old ASCII drew
+        Neon Postgres and Gemini Flash identically to live Cloud Run, which reads
+        as a database that exists. Note this deletes the block whose one-line
+        `dest_state.pq` fix is the commit directly below; that fix was still
+        correct to make, since the false statement was on `main` in the meantime.
+      * [x] **`MODEL_CARD.md` written (2026-09-12)** -- intended use and explicit
+        out-of-scope, the 18 features split into 13 stateless / 5 stateful, per-fold
+        metrics, the precision-ceiling finding, the two dead features with the
+        structural reason they were dead, the snapshot limitation, the
+        fold-3-specific threshold, the provenance gap, and a fairness section
+        stating plainly that PaySim carries **no protected attributes**, so no
+        subgroup analysis is possible and none is claimed. Every figure was taken
+        from the live `/model-info`, the committed CSVs, or the DuckDB store --
+        not from existing prose.
+      * [x] **Business-impact write-up (2026-09-12)** -- README now leads with the
+        answer: **staff 500 reviews/day, net value 3,339,824,109**, verified by
+        re-running `economics.py` against the committed sweep. Added the ±50%
+        sensitivity table the sprint asked for: the recommendation moves under
+        **none** of the six shifts, nor under all three at their worst case. Two
+        caveats are stated rather than buried -- `liability_rate` is *mechanically
+        inert* (recall is 1.000 at 500/day, so `false_negatives = 0` and its term
+        vanishes), and **the grid cannot resolve the true optimum**, which is the
+        smallest K where recall saturates, somewhere between 250 and 500.
+      * [x] **README rewrite + separability caveat first (2026-09-12)** -- opens
+        with the two live links (both re-verified: API 200 in 6.1s cold / 0.34s
+        warm, dashboard 200 after 3 redirects), then the staffing question and its
+        answer, then the PaySim caveat *before* any accuracy number.
+      * **Five defects found while doing the above**, none of them cosmetic:
+        (1) **ARCHITECTURE §0 and `config.yaml` both claimed a break-even range of
+        85,000-161,875.** Re-running `degeneracy_check` gives **84,942-161,795**.
+        The old upper figure comes from using `k` (4,041 marginal reviews) where
+        the shipped code uses `n_flagged` (4,043) for its documented tie-handling
+        reason. README already carried the correct range, so the three sources
+        disagreed with each other. Fixed in both.
+        (2) **The deployed dashboard told visitors the Drift page was a
+        "placeholder; live monitoring ships in Sprint 8"** (`dashboard/Home.py`) --
+        eight commits after Sprint 8 shipped that page with real output. The most
+        publicly visible false claim in the project.
+        (3) **ARCHITECTURE's ASCII said the DuckDB store was 684MB; README said
+        796 MB.** Measured: **833,630,208 bytes = 795.0 MiB**. README was right;
+        the mermaid replacement removed the wrong figure with the block.
+        (4) `ls -la | awk '{print $5}'` reports the Windows *group*, not the size,
+        because the account name contains a space -- caught because it returned an
+        implausible 0.2 MB for the DuckDB store. Sizes here are `os.path.getsize`.
+        (5) **The separability figure was wrong in README and ROADMAP alike:
+        98.8% of fold-2 fraud "drained to the cent" is really 99.1% (763 of
+        770).** Re-derived from the raw table over steps (281, 355] -- which
+        returns exactly the 770 fraud rows the fold records -- under four
+        readings of the phrase (exact equality, ratio rounded to 2dp, ±0.005
+        tolerance, `newbalanceOrig = 0`), all returning 763. No definition
+        produces 98.8%. This one matters more than its size: it sits in the
+        paragraph that argues the model's accuracy is a property of the
+        generator, which is the project's central honesty claim.
+      * **Three defects in this sprint's own output, caught by its own audit
+        before commit** -- recorded because a sprint that audits itself and
+        reports nothing is not credible: (a) the README business table quoted
+        net value **3,339,824,162**, computed from the float32
+        `avg_fraud_amount` in `error_analysis_profile.csv` rather than the
+        authoritative unrounded 1,572,442.875 -- off by ~53 against the repo's
+        own `capacity_economics.csv`, and it was the headline number; (b)
+        `MODEL_CARD.md` listed fold 1's recall as 0.9932, which is `recall_at_k`,
+        not the `capacity_recall` of 0.9910 -- a column mix-up that contradicted
+        README; (c) the card quoted drift precision "0.432-0.640, mean 0.529"
+        as covering all 31 windows, when that range is the **30
+        sufficient-sample** windows -- including window 30 (272 rows, all fraud,
+        precision 1.0) moves the mean to 0.5446. All three are fixed.
+      * **Verified, not assumed:** dataset totals read directly from the DuckDB
+        store -- **6,362,620 rows, 8,213 fraud, 0.1291%, steps 1-743** -- which
+        independently confirms the figure `REPORT.md` carried untracked. README's
+        headline row also recomputes exactly: PR-AUC mean **0.99737** (std
+        0.00452) and Precision@capacity **0.52925** (std 0.03185) from
+        `model_comparison_by_fold.csv`.
+      * [ ] **Demo GIF -- NOT DONE, and it needs a human.** Recording a screen
+        capture is not something this environment can do headlessly. Everything
+        else in the sprint is complete; this is the one outstanding item.
 - [x] Market-alignment review of the plan against 2026 DS hiring requirements
       (2026-08-01, not itself a sprint). Verdict: the MLOps spine is well
       targeted -- "model serving, monitoring, feature stores" are exactly the

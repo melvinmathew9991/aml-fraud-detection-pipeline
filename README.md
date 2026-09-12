@@ -1,5 +1,45 @@
 # AML Fraud Detection Pipeline
 
+**Live — both links answer right now** (verified 2026-09-12):
+
+- **Score a transaction, no setup:** <https://aml-fraud-detection-pipeline.streamlit.app/>
+- **What is actually deployed, from the service itself:** <https://fraud-api-amj2cl4jhq-uc.a.run.app/model-info>
+
+Both scale to zero, so the first request of the day is slow and that is stated
+rather than hidden: the API answered in **6.1 s cold and 0.34 s warm** when
+measured for this README; the dashboard takes ~30 s to wake if it has idled 12 h.
+That latency is the price of running the whole thing at **$0/month**.
+
+## The question this answers
+
+A fraud team cannot review every payment. It reviews as many as it has people
+for. So the useful question is not *how accurate is the model*:
+
+> **How many analysts should we staff, and what do we lose if we staff fewer?**
+
+**The answer on this data: staff to 500 reviews/day.** Net value peaks there
+(~3.34 bn) and falls at every larger queue. Staffing 250/day instead misses
+**208 frauds — about 327 M in exposure, or ~1.31 M per analyst-seat-day** — and
+the recommendation does not move under ±50% shifts in *any* business rate.
+Working, caveats and the sensitivity table: [Business impact](#business-impact-what-the-capacity-decision-is-worth).
+
+## Read this before any accuracy number
+
+**PaySim is synthetic and its fraud is rule-generated** — the source account is
+drained to the cent, confined to `TRANSFER` and `CASH_OUT`. This pipeline reaches
+PR-AUC **0.9974**, and that is a property of the data generator, not a modelling
+achievement. Stated first, because a reviewer who discovers it unaided will
+rightly discount everything else.
+
+**So the model is a component; the decision system around it is the product** —
+leakage-safe features over 6.36 M rows, an operating point derived from review
+capacity rather than from labels, train/serve skew closed to floating-point
+equality, a checksummed serving bundle, CI as the only build, drift monitoring
+with a measured noise floor, and a deployment that rolls itself back. What the
+model does, cannot do, and should not be used for: **[MODEL_CARD.md](MODEL_CARD.md)**.
+
+## What it is
+
 A cost-sensitive fraud-detection pipeline for imbalanced payment transaction
 data. Trains and compares several classifiers (Logistic Regression,
 Ridge- and Lasso-penalized variants, HistGradientBoosting, XGBoost, LightGBM)
@@ -112,13 +152,57 @@ ranking is essentially perfect on this fold — that reflects how separable
 PaySim is (see the fold-2 finding below), and is not a claim that a
 real-world model would behave this way. It is also specific to this fold:
 on fold 1 the same model is *not* at the ceiling, missing 8 of 887 frauds
-(recall 0.991, precision 0.5627 against a ceiling of 887/1562 = 0.5678).
+(recall 0.991, precision 0.5627 against a ceiling of 887/1562 = 0.5679).
 Second, choosing 250/day because this table says so is itself a
 label-informed decision; it is legitimate capacity planning on historical
 data rather than model tuning, but it will drift as fraud volume changes,
 which is a Sprint 8 monitoring concern.
 
-### The exchange rate has a price now: `src/economics.py` (Sprint 3)
+## Business impact: what the capacity decision is worth
+
+**The recommendation is 500 reviews/day**, and that is the answer the exchange
+rate above only gestures at. Net value against the real final-fold data
+(`capacity_economics.csv`, reproduced by re-running `src/economics.py` on
+2026-09-12):
+
+| Reviews/day | Fraud caught | False positives | Net value |
+|---|---|---|---|
+| 100 | 1,617 | 0 | **−2,869,245,425** |
+| 250 | 4,042 | 0 | 2,850,030,532 |
+| **500** | **4,250** | **3,835** | **3,339,824,109** ← maximum |
+| 1,000 | 4,250 | 11,917 | 3,338,207,709 |
+| 2,000 | 4,250 | 28,086 | 3,334,973,909 |
+| 5,000 | 4,250 | 76,583 | 3,325,274,509 |
+
+**How firm is that? It does not move.** Shifting each business rate ±50% around
+its configured value leaves the recommendation at 500/day every time:
+
+| Scenario | Value | Recommended | Net value | Moves? |
+|---|---|---|---|---|
+| baseline | 200 / 0.5 / 1.0 | 500 | 3,339,824,109 | — |
+| `cost_per_review` −50% | 100 | 500 | 3,340,632,609 | no |
+| `cost_per_review` +50% | 300 | 500 | 3,339,015,609 | no |
+| `recovery_rate` −50% | 0.25 | 500 | 1,669,103,555 | no |
+| `recovery_rate` +50% | 0.75 | 500 | 5,010,544,664 | no |
+| `liability_rate` ±50% | 0.5 / 1.5 | 500 | 3,339,824,109 | no (inert) |
+| all three, worst case for staffing up | 300 / 0.25 / 0.5 | 500 | 1,668,295,055 | no |
+
+All figures use the unrounded `avg_fraud_amount` of **1,572,442.875**
+(`AUDIT.md` §3.1), which reproduces the committed `capacity_economics.csv`
+to the cent. Taking the float32 value stored in `error_analysis_profile.csv`
+instead shifts the baseline by ~53 — small, but enough to disagree with the
+repo's own artifact, so the authoritative value is the one used here.
+
+**Two caveats that matter more than the robustness.** `liability_rate` is
+*mechanically inert* here — at 500/day recall is 1.000, so `false_negatives = 0`
+and its term vanishes by construction; quoting it as a rate the answer survived
+would be padding. And **the grid cannot resolve the true optimum**: net value
+rises from 250 to 500 and falls monotonically above it, so the real maximum is
+the *smallest K at which recall saturates*, somewhere between 250 and 500. The
+sweep grid is `[100, 250, 500, 1000, 2000, 5000]`, and 500 is also the configured
+capacity, so "500 is optimal" is a grid point, not a located optimum.
+
+### The exchange rate underneath it: `src/economics.py` (Sprint 3)
 
 The 18-false-positives-per-fraud figure above is an exchange rate, not a
 decision — it says nothing about whether staffing up is worth it in money.
@@ -203,7 +287,8 @@ split never would have. Fold 2's test window (simulated hours 282–355) is
 almost perfectly separable by the tree models (PR-AUC 0.9987–1.0000) but
 not by the linear ones. Checked directly against the raw, un-engineered
 transaction table (not a leak from our own feature pipeline): in that
-window, 98.8% of fraud transactions have `amount_to_balance_ratio` exactly
+window, 99.1% of fraud transactions — 763 of 770 — have
+`amount_to_balance_ratio` exactly
 1.00 (the source account drained to the cent) and 100% have
 `dest_is_merchant = 0` — a known characteristic of how PaySim constructs
 its synthetic fraud. That's a narrow, nonlinear value-band rule: trees
@@ -571,6 +656,7 @@ fraud-detection-project/
 ├── GCP.md                      # GCP free-tier analysis, cost model, deploy checklist
 ├── DEPLOY.md                   # Cloud Run deployment runbook, every command and its output
 ├── MONITORING.md               # drift results, retraining criteria, champion/challenger
+├── MODEL_CARD.md               # intended use, per-fold metrics, limitations, provenance gap
 └── README.md
 ```
 

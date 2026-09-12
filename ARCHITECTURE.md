@@ -48,9 +48,17 @@ The decision needs money on both sides:
 ### The naive version of this is degenerate — measured, not assumed
 
 Computing it against the real data (2026-08-01) gives average fraud amount
-**1,572,443** in the final fold, and a break-even review cost of **85,000 to
-161,875 per alert** across recovery rates from 0.05 to 1.00. No alert review
-costs that. Net value is therefore maximised at full recall under *every*
+**1,572,443** in the final fold, and a break-even review cost of **84,942 to
+161,795 per alert** across recovery rates from 0.05 to 1.00. No alert review
+costs that.
+
+*[Corrected 2026-09-12: this read "85,000 to 161,875". The upper figure was
+computed with `k` (8,083 − 4,042 = 4,041 marginal reviews); `degeneracy_check`
+uses `n_flagged` (8,085 − 4,042 = 4,043) for the tie-handling reason its
+docstring gives, which yields 161,795. Re-run against the committed
+`capacity_sweep.csv`, the shipped code produces 84,942–161,795 — the range
+`README.md` already carried. The conclusion is untouched: no alert review costs
+anything near either figure.]* Net value is therefore maximised at full recall under *every*
 plausible assumption, and the "optimum" is a foregone conclusion.
 
 Shipping a module whose answer never changes would be worse than shipping
@@ -90,38 +98,48 @@ around it. The modelling is competent and deliberately not the headline.
 
 ## 1. Target topology
 
-```
-                          ┌─────────────────────────────────────┐
-   OFFLINE (laptop)       │  GitHub Actions (CI/CD)             │
-   ┌──────────────────┐   │  lint -> test -> smoke-train ->     │
-   │ data/raw/*.csv   │   │  build image -> push AR -> deploy   │
-   │   (493MB, local) │   └──────────────┬──────────────────────┘
-   └────────┬─────────┘                  │ Workload Identity Federation
-            │                            │ (keyless, no JSON key in repo)
-            v                            v
-   ┌──────────────────┐          ┌──────────────────────┐
-   │ paysim.duckdb    │          │ Artifact Registry    │
-   │  (684MB, local)  │          │  (0.5GB free tier)   │
-   └────────┬─────────┘          └──────────┬───────────┘
-            │ train_pipeline.py             │
-            v                               v
-   ┌──────────────────┐          ┌──────────────────────────────┐
-   │ MODEL BUNDLE     │  baked   │  Cloud Run: fraud-api        │
-   │  model.txt       │  into    │  FastAPI + uvicorn           │
-   │  scaler.json     │─ image ─>│  scale-to-zero, max 2 inst   │
-   │  threshold.json  │          │  512MiB / 1 vCPU             │
-   │  dest_state.pq   │          │  public HTTPS endpoint       │
-   └──────────────────┘          └──────────┬───────────────────┘
-                                    │       │       │
-                        HTTPS(JSON)│       │       │
-            ┌───────────────────────┘       │       └──────────────┐
-            v                               v                      v
- ┌──────────────────────────┐  ┌────────────────────┐  ┌────────────────────┐
- │ Streamlit Community Cloud│  │ Neon Postgres      │  │ Gemini Flash API   │
- │  dashboard (public repo) │  │  predictions       │  │  SAR narrative     │
- │  1GB RAM, sleeps @12h    │  │  analyst_feedback  │  │  15 RPM / ~1k RPD  │
- └──────────────────────────┘  │  0.5GB, scale-to-0 │  │  free, no card     │
-                               └────────────────────┘  └────────────────────┘
+Solid boxes are built and live today. **Dotted boxes are Sprints 10-12 and do
+not exist yet** — the diagram says so rather than letting a reader assume a
+database is in the system.
+
+```mermaid
+flowchart TB
+    subgraph offline["OFFLINE · this laptop · not part of the deployed system"]
+        raw["data/raw/*.csv<br/>PaySim 493 MB · gitignored"]
+        duck[("paysim.duckdb<br/>local feature store")]
+        train["train_pipeline.py<br/>3 expanding-window CV folds"]
+        bundle["model_bundle/v2/ · 8.27 MB<br/>model.txt · scaler.json<br/>threshold.json · dest_state.npz"]
+        raw --> duck --> train --> bundle
+    end
+
+    subgraph ci["GitHub Actions · the only build environment"]
+        gate["lint-test<br/>ruff → mypy → pytest → smoke-train"]
+        iso["serving-isolation<br/>requirements-serve.txt ONLY"]
+        cont["container<br/>build → cold start → /score → trivy"]
+        gate --> iso --> cont
+    end
+
+    subgraph gcp["Google Cloud · live"]
+        ar["Artifact Registry<br/>367.5 MB image · 125.0 MB compressed<br/>keepCount 2"]
+        run["Cloud Run · fraud-api<br/>512 MiB · 1 vCPU · max 2 instances<br/>scale-to-zero · public HTTPS"]
+        ar --> run
+    end
+
+    dash["Streamlit Community Cloud<br/>dashboard · display-only, calls the API over HTTP"]
+
+    bundle -->|baked into the image| cont
+    cont -->|"push · Workload Identity Federation (keyless)"| ar
+    run -->|HTTPS JSON| dash
+
+    subgraph planned["PLANNED · Sprints 10-12 · NOT BUILT"]
+        neon[("Neon Postgres<br/>predictions · analyst_feedback")]
+        gem["Gemini Flash<br/>network-level STR narratives"]
+    end
+    run -.->|Sprint 10| neon
+    run -.->|Sprint 12| gem
+
+    classDef unbuilt stroke-dasharray:5 5,color:#888,stroke:#888
+    class neon,gem,planned unbuilt
 ```
 
 **Why Neon, not Supabase.** Supabase free projects **pause after 7 days idle**

@@ -101,7 +101,9 @@ with c2:
         "**3 · Capacity & economics** — the headline finding, made interactive. How many "
         "reviewers, and what is each one worth?\n\n"
         "**4 · Model card** — what the model uses, what drives it, and what it cannot do.\n\n"
-        "**5 · Drift** — placeholder; live monitoring ships in Sprint 8."
+        "**5 · Drift** — whether the model is still working: population shift measured "
+        "over the dataset's own timeline, with the detector's noise floor measured "
+        "rather than asserted."
     )
 
 st.markdown("---")
