@@ -9,6 +9,12 @@ This file is the project's defect register and history record. `ROADMAP.md`
 remains the plan-of-record; `ARCHITECTURE.md` the design; `GIT_WORKFLOW.md`
 the git policy.
 
+**Sections 0–7 are the 2026-08-03 pre-deployment audit and describe the project
+as it stood at the Sprint 6 → Sprint 7 boundary. They are left as written.**
+`§8` is a second, independent audit performed on **2026-09-12** over the whole
+project after Sprint 9 — different scope, different reviewer framing, and one
+finding that materially changes how the results in §3.1 should be read.
+
 ---
 
 ## 0. Verdict
@@ -334,6 +340,12 @@ not exist.**
 | **Audit** | Five documentation claims contradicting their sources (§2.3) | stale claim |
 | **Audit** | `GIT_WORKFLOW.md` §1 described a completed migration as pending (§2.4) | stale claim |
 | **Audit** | No `.gitignore` rule for secrets (§2.5) | governance |
+| **Senior** | `/score/batch` records cumulative batch-elapsed time as *each row's* latency, corrupting `/metrics` p50/p95/p99 and every batch audit record (§8.4) | correctness |
+| **Senior** | Live `/score` returns `BLOCK` from a rule measured at 10.1% precision (§8.4) | judgment |
+| **Senior** | No retraining trigger keys on queue volume — the one failure actually occurring, in 14 of 30 windows (§8.4) | monitoring |
+| **Senior** | `suggest_pos_weight` docstring cites "~0.026% fraud … 3800:1"; the real rate is 0.1291%, giving ~774:1 (§8.4) | stale claim |
+| **Senior** | `capacity_k` clamps K to `n_rows`, silently turning a capacity constraint into "flag everything" on collapsed windows (§8.4) | correctness |
+| **Senior** | Snapshot stores `avg` as float32 against training's float64; 39 of 571,961 differ at epsilon (§8.4) | methodology |
 
 **Two lessons this register supports.** First, a green check that cannot go red
 is worse than no check — the readiness loop and the two `feature_version` tests
@@ -358,6 +370,30 @@ default:
    provably preserved on `main` (§3.3). Shared refs, so this is your call.
 4. **Decide on the 54 orphaned MLflow runs** (§2.2): merge into the canonical
    store, or leave and document. Left in place for now.
+
+   *[RESOLVED 2026-09-12 — merged.* The orphan store turned out to be the more
+   valuable of the two, which is why deleting it was rejected: `src/mlflow.db`
+   held 54 runs ending **2026-07-28 17:54**, while the canonical store's newest
+   run was **2026-07-24 14:45**, and the orphan carried the only MLflow record
+   of run `20260728T172950Z` — the newest training run still surviving under
+   `models/`. In a project that already cannot trace its deployed bundle to a
+   surviving run (item 5 below), discarding that was the wrong direction.
+
+   Both stores were backed up first. The merge was built as a copy and verified
+   before being swapped in: run ids do not overlap (108 + 54 = 162, zero
+   collisions), both databases were at the same schema revision
+   (`alembic_version b7e4c1a90f23`) with identical columns on every merged
+   table, and all five row counts landed exactly
+   (runs 162, params 234, metrics 1504, latest_metrics 1504, tags 1290) with
+   `PRAGMA integrity_check` clean and no duplicate `run_uuid`. The orphan's
+   `artifact_uri` values were rewritten from `/src/mlruns/` to `/mlruns/`, and
+   its one artifact directory relocated and confirmed byte-identical to the
+   backup (8 files, sha256 match). Verified functionally afterwards, not just by
+   row count: `mlflow.search_runs` returns **162 runs**, and the surviving
+   provenance tag is present as `mlflow.runName=20260728T172950Z`.
+
+   `src/mlflow.db` and `src/mlruns/` are now gone, so the working-directory bug
+   in §2.2 leaves no residue.]*
 5. **Bundle provenance gap — DECIDED 2026-08-03: ship as-is, regenerate later.**
    `bundle_meta.json` claims `run_id: 20260801T130131Z`, but neither
    `models/20260801T130131Z/` nor its `reports/` log still exists — the newest
@@ -435,3 +471,217 @@ Stated so the clearance above is not read as broader than it is:
 - **Model quality was not re-litigated.** PaySim is near-trivially separable by
   construction and ARCHITECTURE §0 says so; this audit checked that the
   reported numbers are true, not that they are impressive.
+
+---
+
+# 8. Senior review — whole-project audit (2026-09-12)
+
+Performed against `main` at `2f91d24`, after Sprint 9. Read as a senior data
+scientist in payments fraud / AML auditing this as if it were proposed for
+production at a bank or PSP — a different question from §0–§7, which asked
+whether the project's own claims were true.
+
+**Method.** Every figure below was re-derived from the DuckDB store, the
+committed CSVs, or the running service. Nothing was taken from the project's
+prose, including prose this audit's own earlier sections wrote. Where a
+conclusion depended on a definition ("drained to the cent"), the alternatives
+were computed and compared rather than one being assumed.
+
+**Verdict.** As an ML *systems* project this is in the top few percent of what a
+reviewer sees: the engineering discipline is real and unusual. As a fraud/AML
+*modelling* project it rests on a dataset that does not require a model, and
+§8.1 states that far more precisely than the project previously did.
+
+---
+
+## 8.1 A three-predicate rule beats the deployed model
+
+Using only raw columns, with no model:
+
+```
+type ∈ {TRANSFER, CASH_OUT}
+  AND  |(oldbalanceOrg − newbalanceOrig) − amount| ≤ 0.01   -- balances reconcile
+  AND  oldbalanceOrg > 0 AND newbalanceOrig = 0             -- origin emptied
+```
+
+| Scope | Flagged | True positives | False positives | Precision | Recall |
+|---|---|---|---|---|---|
+| **All 6,362,620 rows** | 8,008 | 8,008 | **0** | **1.0000** | **0.9750** |
+| **Fold 3 test window** | 4,125 | 4,125 | **0** | **1.0000** | **0.9706** |
+| *Deployed model @ 500/day* | *8,085* | *4,250* | *3,835* | *0.5257* | *1.0000* |
+
+The rule catches 97% of fraud with **zero false positives in 6.36M transactions**,
+using half the review capacity the model's operating point consumes. The model's
+entire marginal contribution on the deployed fold is the last **125** frauds,
+bought with **3,835** false positives.
+
+**Why.** `orig_balance_mismatch` is the top feature by SHAP (0.2518 of total
+attribution) and its behaviour is inverted from intuition:
+
+| Population | Rows | Balance mismatch |
+|---|---|---|
+| Non-fraud, all types | 6,354,407 | **79.73%** |
+| Fraud | 8,213 | **0.55%** |
+| Non-fraud, TRANSFER/CASH_OUT only | 2,762,196 | **90.47%** |
+
+By type: CASH_IN 100.00%, TRANSFER 95.47%, CASH_OUT 88.95%, PAYMENT 53.72%,
+DEBIT 29.79%. PaySim writes arithmetically consistent balances for the fraud it
+constructs and leaves the rest of its ledger inconsistent, so the model's
+largest single driver is detecting **which simulator code path wrote the row**.
+
+This is a stronger statement than the one ARCHITECTURE §0 and MODEL_CARD §10
+make. They cite the drained-to-the-cent rule (99.1% of fold-2 fraud) — a
+*behavioural* artifact a real fraudster might also produce. The
+balance-reconciliation inversion is a *bookkeeping* artifact with no real-world
+analogue, and it is what makes the problem degenerate.
+
+**What follows.** PR-AUC 0.9974 is fully explained and needs no attribution to
+modelling skill. The capacity/economics analysis rests on a precision/recall
+tradeoff that largely does not exist here. None of this invalidates the
+engineering: the serving path, skew tests, CI, monitoring and deployment would
+be identical for a model that mattered — which is the honest defence, and a good
+one. **Recommendation: lead with this finding.** "A three-line rule beats my
+model, here is the evidence, here is why the system is still the deliverable" is
+a far stronger position than reporting 0.9974.
+
+## 8.2 This is fraud detection, not AML
+
+PaySim's `isFraud` marks account takeover and cash-out. Anti-money-laundering
+concerns placement, layering and integration — structuring, smurfing,
+round-tripping, mule networks — visible only *across* transactions and entities
+over time. Absent here: entity resolution, typology coverage, multi-hop graph
+features (planned, Sprint 11), case management / SAR-STR workflow, sanctions and
+PEP screening, and model-risk governance (independent validation sign-off, a
+production challenger, a documented backtesting protocol).
+
+The destination-side velocity and fan-in features are the right instinct and the
+most AML-shaped part of the system. The criticism is the label on the tin: an
+AML interviewer raises this within five minutes. Either rename it, or state the
+distinction in README's first section.
+
+## 8.3 The threshold/queue mismatch — the one real design flaw
+
+K is derived from capacity (correct: staffing is known in advance, the fraud
+count is not), then the *score at position K* ships as a fixed constant. A fixed
+score does not produce a fixed queue. The project's own drift output proves it:
+across 31 windows the queue runs **272 to 4,594 alerts/day against a capacity of
+500, exceeding it in 14 of the 30 full windows** — a 9× swing in analyst workload
+from an operating point chosen to control analyst workload.
+
+Standard fixes: a rank-based cutoff per scoring period; a **rolling-percentile
+threshold** recomputed from the last 24–48h and shipped as a percentile rather
+than a score (usually the right answer for single-transaction decisions); or a
+closed-loop controller holding queue length near target. **No retraining trigger
+in MONITORING §4 keys on queue volume**, so the failure actually occurring would
+never raise a flag.
+
+Two related weaknesses. `capacity_k` clamps K to `n_rows`, so a collapsed window
+flags everything (window 30: 272 rows, all 272 flagged) — a capacity constraint
+silently becoming "review everything". And the destination snapshot is frozen at
+**step 743**: velocity is precisely the mule signal and the feature set that goes
+stale fastest, with no refresh path short of rebuilding the bundle. `state_hit`
+reports *coverage*, not *staleness*; a `snapshot_age_days` field would be its
+honest companion.
+
+**What is genuinely strong**, stated at the same detail as the criticisms:
+leakage safety is real and verifiable (`ROWS BETWEEN UNBOUNDED PRECEDING AND 1
+PRECEDING` for history, `RANGE BETWEEN 24 PRECEDING AND 1 PRECEDING` for
+velocity — the RANGE frame correctly excludes same-`step` peers, which most
+implementations get wrong); the skew treatment is better than most production
+systems (golden-file test at exact floating-point equality, plus a CI job
+installing *only* `requirements-serve.txt`, which already caught a real
+`libgomp` failure); the PSI implementation is unusually careful (symmetric
+divergence, binning chosen from reference cardinality, open-ended edges,
+doubly-empty bins dropped, a `0.5/n` floor with an argument behind it rather
+than the conventional arbitrary 1e-4); the audit log does what it claims —
+checked specifically, because that claim is often aspirational: `audit.py`
+hashes to sha256 and never logs raw balances or account ids; and negative
+results are retained rather than tidied away.
+
+## 8.4 Defects found
+
+| # | Severity | Finding |
+|---|---|---|
+| 1 | **High** | `/score/batch` computes `row_latency_ms = (perf_counter() − start)` *inside* the loop with `start` fixed at batch start, then passes it to `MetricsTracker.record_score` and `log_prediction`. A 10,000-row batch injects 10,000 monotonically increasing values, so `/metrics` p50/p95/p99 report batch position rather than latency, and the audit log inherits the same wrong number. |
+| 2 | **Medium** | The live `/score` endpoint returns **`BLOCK`** from a rule measured at **10.1% precision** — nine legitimate customers blocked per fraud. Either gate it behind a config flag (default off) or add the missing predicate from §8.1, which takes the same rule to 100% precision on this data. |
+| 3 | **Medium** | No retraining trigger keys on queue volume (§8.3). |
+| 4 | **Low** | `custom_metrics.suggest_pos_weight` docstring claims "~0.026% fraud … roughly 3800:1"; the real rate is **0.1291%**, giving ~774:1. |
+| 5 | **Low** | `capacity_k` clamps to `n_rows` (§8.3). |
+| 6 | **Low** | Snapshot stores `avg` as float32 against training's float64; 39 of 571,961 differ at epsilon — documented, but a permanent skew source in the five stateful features. |
+
+Nothing found here contradicts a claim the project makes about itself, except
+§8.1 (where the project understates its own problem) and defect 4.
+
+## 8.5 Methodological critiques
+
+**PSI bands are borrowed from a regime that does not apply.** The 0.10/0.25
+thresholds come from credit-scorecard practice, where population sizes are
+broadly stable. Here windows span **272 to 574,255 rows — a 2,000× range** — and
+the deliberate `0.5/n` empty-bin floor makes PSI explicitly sample-size
+dependent. A PSI of 0.25 therefore does not mean the same thing in window 2 as
+in window 16. `sufficient_sample` mitigates the worst of it but does not make
+the values comparable; a size-normalised statistic, or bands calibrated per
+volume decile, would be defensible.
+
+**The "tree models are tied" claim is honest but untestable as constructed.**
+Five models spanning 0.5254–0.5293 with ±0.03 fold-to-fold std across **three**
+folds gives no test any power. Sprint 11's planned significance testing will not
+fix n=3; more folds or a blocked bootstrap within folds would.
+
+**No embargo between CV train and test windows.** With a 24-hour velocity
+feature, a test row one hour past the boundary draws history from the training
+period. Not label leakage, and it *is* what a production feature store would
+serve — but purging/embargoing is standard in financial time-series ML, and its
+absence should be a stated choice.
+
+**Monitoring is distributional, not performance-based.** With no label feedback
+loop, trigger A (`recall_at_capacity < 1.0`) cannot fire in production; it can
+only be evaluated retrospectively. Until Sprint 10 lands analyst dispositions,
+"monitoring" means a drift detector over a fixed historical dataset plus a
+liveness check. MONITORING §4 says this plainly, to its credit — but the gap
+between "monitoring exists" and "we would know if the model degraded tomorrow"
+is the largest remaining distance between this and production.
+
+## 8.6 Production readiness
+
+| Area | State |
+|---|---|
+| **Authentication** | **None.** Public unauthenticated scoring endpoint; rate limiting and body-size caps exist, authentication does not. Sprint 10. |
+| **Persistence** | None. `/metrics` is per-instance and resets on cold start. |
+| **Reproducibility** | **Broken by a known gap.** The bundle records `run_id 20260801T130131Z` / `git_commit b874804-dirty`; those artifacts no longer exist. The deployed model cannot be rebuilt. In a regulated deployment this alone blocks approval. |
+| **Rollback** | Genuinely good — deploy-without-traffic, verify, migrate, drill actually performed. |
+| **Cost controls** | Budget alert, max-instances ceiling, scale-to-zero, registry retention — verified against the billing API. |
+| **Data validation** | pandera schema at ingest over a 50k reservoir sample; explicitly traded off. A rare violation can still pass. |
+| **Fairness** | Impossible on PaySim (no protected attributes) and correctly not claimed. A real deployment needs it before launch. |
+
+## 8.7 What I would do next, ranked
+
+1. **State §8.1 prominently** and ship the three-predicate rule as a documented
+   baseline the model must beat. Highest value per hour in the backlog, and a
+   credibility multiplier rather than an admission.
+2. **Fix the batch latency defect** (§8.4 #1) — it corrupts the only performance
+   telemetry the system has.
+3. **Replace the fixed threshold with a rolling-percentile operating point** and
+   add a queue-volume retraining trigger (§8.3).
+4. **Gate or fix the hard-block rule** (§8.4 #2) before anyone clicks the demo.
+5. **Rename, or explicitly scope, the AML framing** (§8.2) — one paragraph.
+6. **Then** Sprints 10–12 as planned. Graph analytics (Sprint 11) would most
+   change what this project *is*, because it is where AML starts and where
+   PaySim's degeneracy stops helping.
+
+Explicitly **not** recommended: retraining, tuning, or chasing a better score.
+The dataset cannot distinguish model quality at this point, and §8.1 shows the
+ranking problem is not the bottleneck.
+
+## 8.8 What this review did not cover
+
+- **No training re-run.** Metrics verified against committed CSVs and the DuckDB
+  store, not regenerated.
+- **No load, soak or concurrency testing.**
+- **No security review** beyond noting the absence of authentication — no
+  dependency CVE audit beyond the existing trivy scan, no input fuzzing, no
+  review of the rate limiter under distributed load.
+- **No review of the dashboard's Streamlit code** beyond the landing page.
+- **Sprint 9's own corrections were taken as verified** by that sprint's audit
+  and not independently re-derived, except the balance-mismatch figures in §8.1,
+  which are new measurements.

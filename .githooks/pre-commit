@@ -2,7 +2,8 @@
 # Blocks the two mistakes that are painful to undo (GIT_WORKFLOW.md §5).
 # Advisory guards against accident, not security controls.
 
-# 1. Large files (the 493MB raw CSV, the 684MB DuckDB store)
+# 1. Large files (the 493MB raw CSV, the ~795MiB DuckDB store -- re-measured
+#    2026-09-12 at 833,630,208 bytes; this comment said 684MB, which was stale)
 for f in $(git diff --cached --name-only --diff-filter=A); do
   [ -f "$f" ] || continue
   sz=$(wc -c < "$f")

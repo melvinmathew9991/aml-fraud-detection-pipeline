@@ -122,10 +122,23 @@ def task_sample_data() -> int:
     return py("src/generate_sample_data.py")
 
 
+def task_dashboard_sample() -> int:
+    """Regenerate dashboard/sample_transactions.csv (the committed 50k-row demo sample).
+
+    Safe, unlike `sample-data`: this opens the DuckDB store read-only and writes
+    only to dashboard/sample_transactions.csv. It never touches data/raw/.
+    Requires the DuckDB store to exist (run `train` first on a fresh clone).
+    """
+    return py("src/generate_dashboard_sample.py")
+
+
 def task_clean() -> int:
-    """Remove Python caches. Does not touch data/, models/, reports/ or mlflow.db."""
+    """Remove Python and tool caches. Does not touch data/, models/, reports/ or mlflow.db."""
     removed = 0
-    for pattern in ("**/__pycache__", "**/.pytest_cache", "**/*.pyc"):
+    # .mypy_cache and .ruff_cache were missing until 2026-09-12: `clean` left
+    # 20MB behind and reported success, which is worse than not having the task.
+    for pattern in ("**/__pycache__", "**/.pytest_cache", "**/.mypy_cache",
+                    "**/.ruff_cache", "**/*.pyc"):
         for path in ROOT.glob(pattern):
             if path.is_dir():
                 shutil.rmtree(path, ignore_errors=True)
@@ -147,6 +160,7 @@ TASKS = {
     "bundle": task_bundle,
     "drift": task_drift,
     "sample-data": task_sample_data,
+    "dashboard-sample": task_dashboard_sample,
     "clean": task_clean,
 }
 
