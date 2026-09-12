@@ -10,6 +10,16 @@ rather than hidden: the API answered in **6.1 s cold and 0.34 s warm** when
 measured for this README; the dashboard takes ~30 s to wake if it has idled 12 h.
 That latency is the price of running the whole thing at **$0/month**.
 
+![Scoring two real transactions against the live API](assets/demo.gif)
+
+*A terminal session against the deployed service — not a mock-up and not a
+screen recording. Every value shown is what the API actually returned when the
+image was rendered: the threshold, the probability, the reason codes, the
+latency. The two payloads are real rows from `dashboard/sample_transactions.csv`.
+Rebuild it against production at any time with `python tasks.py demo-gif`, which
+is why `src/generate_demo_gif.py` is committed alongside it — a binary asset
+nobody can regenerate is a binary asset nobody can check.*
+
 ## The question this answers
 
 A fraud team cannot review every payment. It reviews as many as it has people

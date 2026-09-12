@@ -1,5 +1,19 @@
-# Lint/type-check tooling only, for local dev and the CI PR gate -- never
-# installed into the training or serving environments. Rule config lives in
-# pyproject.toml ([tool.ruff], [tool.mypy]), not here.
+# Developer tooling for local dev and the CI PR gate -- never installed into
+# the training or serving environments. Rule config lives in pyproject.toml
+# ([tool.ruff], [tool.mypy]), not here.
+#
+# Scope widened 2026-09-12, deliberately rather than quietly: this file read
+# "lint/type-check tooling only" until src/generate_demo_gif.py (the README
+# demo-GIF renderer) needed Pillow. That is a maintainer tool, not a training
+# or serving dependency, so it belongs here rather than in requirements-train
+# -- but it is not a linter either, and adding it without amending the stated
+# scope would have made this header false.
+#
+# Pillow was briefly assumed to arrive transitively via matplotlib. It does
+# not: matplotlib is in none of the three requirements files, and Pillow is
+# present in a full dev environment only because Streamlit requires it. That
+# would have broken `pip install -r requirements-train.txt` followed by
+# `python tasks.py demo-gif`, so it is declared here instead of left to chance.
 ruff==0.16.1
 mypy==2.3.0
+pillow==12.3.0

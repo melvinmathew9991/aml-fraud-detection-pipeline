@@ -28,3 +28,12 @@
 # returns the attribute to unspecified for these paths. Verified below with
 # `git check-attr`, not assumed.
 model_bundle/** -text !eol
+
+# Same reasoning, different file type: the README's demo GIF is binary, and the
+# global `* text=auto eol=lf` above would otherwise be free to touch it. git's
+# content sniffing normally detects GIF as binary, but relying on a heuristic
+# for a file whose corruption shows up as a broken image on the project's front
+# page is the same bet that lost with model.txt. `!eol` accompanies `-text` for
+# the reason documented above. Verified with `git check-attr`, not assumed.
+assets/** -text !eol
+*.gif -text !eol
