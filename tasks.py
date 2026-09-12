@@ -132,6 +132,16 @@ def task_dashboard_sample() -> int:
     return py("src/generate_dashboard_sample.py")
 
 
+def task_demo_gif() -> int:
+    """Rebuild assets/demo.gif from the LIVE service (needs network + Pillow).
+
+    Calls the deployed API and renders whatever it actually returns, so the
+    README's demo cannot quietly drift from the running service. Pass
+    --api-base to point it at a local uvicorn instead.
+    """
+    return py("src/generate_demo_gif.py")
+
+
 def task_clean() -> int:
     """Remove Python and tool caches. Does not touch data/, models/, reports/ or mlflow.db."""
     removed = 0
@@ -161,6 +171,7 @@ TASKS = {
     "drift": task_drift,
     "sample-data": task_sample_data,
     "dashboard-sample": task_dashboard_sample,
+    "demo-gif": task_demo_gif,
     "clean": task_clean,
 }
 

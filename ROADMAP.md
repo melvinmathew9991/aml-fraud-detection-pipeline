@@ -1305,7 +1305,8 @@ story.
       Also: `git_commit_hash` moved from `train_pipeline.py` to `config.py`, so
       the drift job can stamp provenance without importing the training
       pipeline's module-level logging and mkdir side effects.
-- [ ] Sprint 9 -- portfolio polish **(project is complete and shippable here)**
+- [x] Sprint 9 -- portfolio polish **(project is complete and shippable here)**
+      -- closed 2026-09-12, all six deliverables plus the end-to-end audit.
       * [x] **Stale-claim sweep (2026-09-12)** -- first Sprint 9 item, done
         ahead of the diagram and README rewrite so the rewrite builds on true
         statements. Seven tracked docs carried claims that had gone stale in
@@ -1416,9 +1417,30 @@ story.
         headline row also recomputes exactly: PR-AUC mean **0.99737** (std
         0.00452) and Precision@capacity **0.52925** (std 0.03185) from
         `model_comparison_by_fold.csv`.
-      * [ ] **Demo GIF -- NOT DONE, and it needs a human.** Recording a screen
-        capture is not something this environment can do headlessly. Everything
-        else in the sprint is complete; this is the one outstanding item.
+      * [x] **Demo GIF (2026-09-12)** -- `assets/demo.gif`: a terminal session
+        against the live service, embedded at the top of README. Built rather
+        than screen-recorded, because this environment cannot drive a browser:
+        `src/generate_demo_gif.py` calls the deployed API and renders whatever
+        it returns. **The script is committed with the GIF deliberately** -- a
+        binary in a repo whose whole method is reviewable diffs is otherwise an
+        unverifiable blob, and rendering from a saved transcript would let the
+        demo drift from the service while still looking correct, which is this
+        repo's signature defect. Measured: 325 KB, 624x652, 50 written frames,
+        10.7 s/loop, every frame decoded and four inspected visually.
+        **Three defects caught while building it, none of which the byte-level
+        checks would have found:** (a) the first render was **1,683 KB** because
+        `disposal=2` forces a full-frame rewrite and defeats delta encoding;
+        (b) the fraud probability printed as a flat `1.000000` under `.6f`,
+        rounding away a true 0.99999998 and overstating the model *in its own
+        demo*; (c) retiming overshot to **3.8 s/loop**, too fast to read the
+        response, because `FRAME_MS` and the holds were cut together -- holds
+        are the right lever, since PIL coalesces identical held frames and sums
+        their durations, so dwell time costs almost no bytes.
+        Also added `assets/** -text !eol` and `*.gif -text !eol` to
+        `.gitattributes`: the global `* text=auto eol=lf` would otherwise be
+        free to mangle a binary, which is exactly how `model.txt` was corrupted
+        once (AUDIT sec 2.1). Confirmed with `git check-attr` -- the GIF now
+        resolves identically to the `model_bundle/**` exemption.
 - [x] Market-alignment review of the plan against 2026 DS hiring requirements
       (2026-08-01, not itself a sprint). Verdict: the MLOps spine is well
       targeted -- "model serving, monitoring, feature stores" are exactly the
