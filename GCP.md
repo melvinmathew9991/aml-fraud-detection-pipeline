@@ -80,16 +80,18 @@ Cloud Build's 2,500-minute allowance is never touched.
 
 ## 4. This project's measured consumption
 
-Measured, not estimated. Image figures come from CI run `34344122710`
-(2026-09-09, superseding `30795258811`); container latency from runs
-`30788266390` / `30792154470`; the Cloud Run figures from the live service on
-2026-09-09.
+Measured, not estimated. Image and container-latency figures are the ones
+recorded by PR #21 (`cea59f4`, 2026-09-10), which re-measured them after the v2
+bundle dropped `pyarrow`; the Cloud Run figures are from the live service on
+2026-09-09 and are **not** re-measured since — a deployed cold start after the
+image shrank has not been taken.
 
 | Metric | Measured |
 |---|---|
-| Image, uncompressed | 518.9 MB |
-| Image, compressed (registry storage) | 172.7 MB (33%) |
-| Cold start (`docker run` → first 200 from `/ready`) | 3,298–3,307 ms |
+| Image, uncompressed | 367.5 MB |
+| Image, compressed (registry storage) | 125.0 MB (34%) |
+| Cold start (`docker run` → first 200 from `/ready`) | 2,234 ms |
+| Memory after a scored request | 71.96 MiB |
 | **Cold start, deployed Cloud Run** (India → `us-central1`, 21 min idle) | **5,311 ms round trip** |
 | **Warm round trip, deployed Cloud Run** | **323–342 ms** |
 | `/score` latency, in-container | 5.3 ms |
@@ -176,6 +178,15 @@ The retention policy was originally planned as "3 versions" against an assumed
 ~185 MB image. The real image is **518.9 MB uncompressed / 172.7 MB
 compressed**, which invalidated the arithmetic.
 
+*[Updated 2026-09-12. PR #21 (`cea59f4`) dropped `pyarrow` with the v2 bundle
+and CI re-measured the image at **367.5 MB uncompressed / 125.0 MB
+compressed**. The table below is the arithmetic at 172.7 MB and is kept as the
+record of why retention is 2. At 125.0 MB the picture changes: three versions
+are 375 MB and fit both readings, four are exactly 500 MB and do not. **The
+deployed policy is unchanged at `keepCount: 2`** — raising it is a live-config
+decision, not a doc edit, and §6's later findings about transient versions and
+sweep timing apply whatever the count is.]*
+
 Google documents the free tier as "0.5 GB", which is ambiguous, and the two
 readings disagree at exactly this size:
 
@@ -214,7 +225,8 @@ holds under the favourable interpretation of a billing unit is not a policy, and
 
 **Layer deduplication is upside, not licence.** Artifact Registry shares layers
 within a repository — *"images with common layers share those layers"* — so two
-versions cost less than 2 × 172.7 MB. The `python:3.12-slim` base (~50 MB) is
+versions cost less than 2 × 172.7 MB (2 × 125.0 MB since PR #21). The
+`python:3.12-slim` base (~50 MB) is
 identical across builds and stored once. Whether the large venv layer dedupes
 depends on `pip install` producing a byte-identical layer in CI, which is not
 guaranteed without a layer cache. **The retention decision assumes no
