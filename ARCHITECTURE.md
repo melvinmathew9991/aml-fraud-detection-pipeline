@@ -110,7 +110,7 @@ around it. The modelling is competent and deliberately not the headline.
    │  model.txt       │  into    │  FastAPI + uvicorn           │
    │  scaler.json     │─ image ─>│  scale-to-zero, max 2 inst   │
    │  threshold.json  │          │  512MiB / 1 vCPU             │
-   │  dest_state.pq   │          │  public HTTPS endpoint       │
+   │  dest_state.npz  │          │  public HTTPS endpoint       │
    └──────────────────┘          └──────────┬───────────────────┘
                                     │       │       │
                         HTTPS(JSON)│       │       │
